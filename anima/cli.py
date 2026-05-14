@@ -84,6 +84,10 @@ class AnimaRuntime:
         )
         self._channel = None
 
+        # 初始化工具调度器（确保在 mind_loop 之前可用）
+        from anima.tools import get_dispatcher
+        self.dispatcher = get_dispatcher()
+
     async def _load_state(self):
         if not self._state_file.exists():
             raise RuntimeError("员工尚未初始化，请先运行: anima init")

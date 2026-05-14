@@ -17,6 +17,7 @@ from anima.events import (
     emit_system, emit_perception, emit_thinking, emit_action,
     emit_skill, emit_question, emit_evolution, emit_memory,
 )
+from anima.tools.dispatcher import get_dispatcher
 
 logger = logging.getLogger("anima.loop")
 
@@ -200,6 +201,11 @@ class MindLoop:
             data={"full_response_length": len(thinking)},
         )
 
+        # ── 判断是否需要执行工具 ─────────────────────────────
+        tool_result = await self._maybe_execute_tool(node.question, thinking, system_prompt)
+        if tool_result:
+            thinking = thinking + f"\n\n[工具执行结果]\n{tool_result}"
+
         # ── 自动发现并安装技能 ───────────────────────────────
         needed = self._skills.discover_for_task(node.question)
         installed: list[str] = []
@@ -262,6 +268,52 @@ class MindLoop:
                 msg += f"\n📂 已激活新领域：{'、'.join(DOMAIN_LABELS.get(d, d) for d in new_domains)}"
             await self._notify(msg)
             await emit_action("通知主人", msg[:80])
+
+    async def _maybe_execute_tool(self, question: str, thinking: str, system_prompt: str) -> str | None:
+        """
+        让大脑判断是否需要执行工具。
+        如果需要，调用 dispatcher 执行并返回结果。
+        """
+        dispatcher = get_dispatcher()
+        available = dispatcher.available_tools
+
+        if not available:
+            return None
+
+        # 让大脑判断是否需要使用工具
+        tool_prompt = f"""你刚才对问题「{question}」做了分析，得出方案：
+{thinking[:300]}
+
+你现在可以使用以下工具来执行具体操作：
+{chr(10).join(f"- {t}" for t in available)}
+
+如果需要执行工具，请返回 JSON：
+{{"use_tool": true, "tool_name": "工具名", "args": {{"参数名": "值"}}}}
+
+如果不需要工具（纯思考/建议类问题），返回：
+{{"use_tool": false}}"""
+
+        try:
+            result = await self._brain.think_json(system_prompt, tool_prompt)
+
+            if not result.get("use_tool"):
+                return None
+
+            tool_name = result.get("tool_name", "")
+            tool_args = result.get("args", {})
+
+            if not tool_name or not dispatcher.has_tool(tool_name):
+                return None
+
+            # 执行工具
+            await emit_action(f"准备执行工具: {tool_name}", str(tool_args)[:60])
+            tool_output = await dispatcher.execute(tool_name, tool_args)
+
+            return tool_output
+
+        except Exception as e:
+            logger.warning(f"[MindLoop] 工具判断/执行失败: {e}")
+            return None
 
     async def _spawn_children(self, parent_id: str, thinking: str, priority: float) -> None:
         if priority < 0.4:
