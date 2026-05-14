@@ -4,6 +4,18 @@
 # 或者：.\install.ps1
 # ============================================================
 
+# 当通过 irm | iex 执行时，stdin 被管道占用，交互式 input() 无法工作。
+# 解决方案：下载脚本到临时文件后重新执行。
+if (-not $env:ANIMA_INSTALL_RUNNING) {
+    $env:ANIMA_INSTALL_RUNNING = "1"
+    $tempScript = Join-Path $env:TEMP "anima-install.ps1"
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/longnull-ck/animaclaw/main/install.ps1" -OutFile $tempScript -UseBasicParsing
+    & powershell -ExecutionPolicy Bypass -File $tempScript
+    Remove-Item $tempScript -ErrorAction SilentlyContinue
+    Remove-Item Env:\ANIMA_INSTALL_RUNNING -ErrorAction SilentlyContinue
+    return
+}
+
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
@@ -26,6 +38,7 @@ if (-not $Python) {
     Write-Host "    下载地址: https://www.python.org/downloads/"
     Write-Host "    安装时请勾选 'Add Python to PATH'"
     Write-Host ""
+    Read-Host "按回车退出"
     exit 1
 }
 
@@ -37,6 +50,7 @@ $PyMinor = & $Python -c "import sys; print(sys.version_info.minor)"
 if ([int]$PyMajor -lt 3 -or ([int]$PyMajor -eq 3 -and [int]$PyMinor -lt 11)) {
     Write-Host "  [X] Python 版本太低：$PyVersion（需要 3.11+）" -ForegroundColor Red
     Write-Host "  请升级 Python 后重试。"
+    Read-Host "按回车退出"
     exit 1
 }
 
@@ -51,6 +65,7 @@ if (-not (Test-Path "pyproject.toml")) {
     } else {
         Write-Host "  [X] 未找到 git，请先安装 git 或手动下载仓库" -ForegroundColor Red
         Write-Host "    下载地址: https://git-scm.com/download/win"
+        Read-Host "按回车退出"
         exit 1
     }
 }
@@ -68,7 +83,7 @@ Write-Host "  [OK] 依赖安装完成" -ForegroundColor Green
 if (-not (Test-Path ".env")) {
     if (Test-Path ".env.example") {
         Copy-Item ".env.example" ".env"
-        Write-Host "  [OK] 已创建 .env 文件（请编辑填入 API Key）" -ForegroundColor Green
+        Write-Host "  [OK] 已创建 .env 文件" -ForegroundColor Green
     }
 }
 
