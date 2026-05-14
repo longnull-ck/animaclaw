@@ -73,6 +73,7 @@ class ChannelRegistry:
                     brain=self._brain,
                     owner_chat_id=os.getenv("TELEGRAM_OWNER_CHAT_ID", ""),
                 )
+                channel.set_router(self._router)
                 await channel.start()
 
                 # Register unified message handler
@@ -97,6 +98,7 @@ class ChannelRegistry:
                     owner_user_id=os.getenv("DISCORD_OWNER_USER_ID", ""),
                     guild_id=os.getenv("DISCORD_GUILD_ID"),
                 )
+                channel.set_router(self._router)
                 await channel.start()
                 self._channels["discord"] = channel
                 started.append("Discord")
@@ -114,6 +116,7 @@ class ChannelRegistry:
                     brain=self._brain,
                     owner_user_id=os.getenv("SLACK_OWNER_USER_ID", ""),
                 )
+                channel.set_router(self._router)
                 await channel.start()
                 self._channels["slack"] = channel
                 started.append("Slack")

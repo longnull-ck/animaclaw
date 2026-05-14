@@ -44,6 +44,9 @@ class ToolDispatcher:
         from anima.tools.file_ops import tool_file_read, tool_file_write
         from anima.tools.bash import tool_bash
         from anima.tools.spreadsheet import tool_spreadsheet
+        from anima.tools.summarize import tool_summarize
+        from anima.tools.email import tool_email
+        from anima.tools.calendar import tool_calendar
 
         self.register("tool_web_search", tool_web_search)
         self.register("tool_web_read", tool_web_read)
@@ -51,6 +54,9 @@ class ToolDispatcher:
         self.register("tool_file_write", tool_file_write)
         self.register("tool_bash", tool_bash)
         self.register("tool_spreadsheet", tool_spreadsheet)
+        self.register("tool_summarize", tool_summarize)
+        self.register("tool_email", tool_email)
+        self.register("tool_calendar", tool_calendar)
 
     def register(self, name: str, fn: ToolFunction) -> None:
         """注册一个工具"""

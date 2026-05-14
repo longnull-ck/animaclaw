@@ -196,10 +196,20 @@ class SlackChannel(BaseChannel):
         })
 
         try:
-            response = await self.brain.think(
-                "你是一个全能型AI员工，简洁友好地回复用户消息。",
-                text,
-            )
+            # 优先使用 MessageRouter（统一上下文：身份+记忆+进化追踪）
+            if self._router:
+                response = await self._router.route(
+                    text,
+                    channel="slack",
+                    sender_id=str(event.get("user", "unknown")),
+                )
+            else:
+                # 降级：直接调用 brain（无上下文注入）
+                response = await self.brain.think(
+                    "你是一个全能型AI员工，简洁友好地回复用户消息。",
+                    text,
+                )
+
             if response:
                 # 在线程中回复（保持上下文）
                 thread_ts = event.get("thread_ts") or event.get("ts") if not is_dm else None
