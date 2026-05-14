@@ -1,6 +1,8 @@
 """
 Anima — Mind Loop（思维心跳循环）
 这是整个系统的"生命迹象"——永不停止的感知-思考-行动循环。
+
+透明化：每一步都通过 events 模块广播，前端实时可见。
 """
 
 from __future__ import annotations
@@ -11,6 +13,10 @@ from datetime import datetime
 from typing import Callable, Awaitable
 
 from anima.models import Signal, SignalType, QuestionSource, ExperienceOutcome, AnimaState
+from anima.events import (
+    emit_system, emit_perception, emit_thinking, emit_action,
+    emit_skill, emit_question, emit_evolution, emit_memory,
+)
 
 logger = logging.getLogger("anima.loop")
 
@@ -64,6 +70,7 @@ class MindLoop:
         self._pending_signals.append(signal)
 
     async def _loop(self) -> None:
+        await emit_system("心跳循环启动", f"间隔: {self._default_interval}s")
         while self._running:
             try:
                 external = self._pending_signals.copy()
@@ -73,74 +80,171 @@ class MindLoop:
                 break
             except Exception as e:
                 logger.error(f"[MindLoop] tick 异常: {e}", exc_info=True)
+                await emit_system("心跳异常", str(e), data={"error": True})
             await asyncio.sleep(self._calc_interval())
+        await emit_system("心跳循环停止")
 
     async def _tick(self, external_signals: list[Signal]) -> None:
         self._tick_count += 1
         state = await self._get_state()
 
+        next_interval = self._calc_interval()
+        await emit_system(
+            f"心跳 #{self._tick_count}",
+            f"下次: {next_interval}s 后",
+            data={"tick": self._tick_count, "next_interval_s": next_interval},
+        )
+
+        # ── Step 1: 收集信号 ─────────────────────────────────
         signals = external_signals + self._gen_internal_signals(state)
+
         for sig in signals:
             if sig.strength < 0.3:
                 continue
+
+            await emit_perception(
+                f"感知到 {sig.type.value} 信号",
+                f"强度: {sig.strength:.0%} | {sig.payload}",
+                data={"signal_type": sig.type.value, "strength": sig.strength},
+            )
+
             q = self._signal_to_question(sig, state)
             if q:
                 self._qtree.add_root(q, QuestionSource.INSTINCT, sig.strength)
+                await emit_question(
+                    "新问题产生",
+                    q[:80],
+                    data={"source": "instinct", "priority": sig.strength},
+                )
 
+        # ── Step 2: 处理最高优先级问题 ───────────────────────
         node = self._qtree.next_pending()
         if node:
             await self._process_question(node, state)
 
+        # ── Step 3: 定期任务 ─────────────────────────────────
         await self._run_scheduled(state)
 
+        # ── Step 4: 保存状态 ─────────────────────────────────
         state.tick_count = self._tick_count
         state.last_tick_at = datetime.utcnow().isoformat()
         await self._save_state(state)
 
     async def _process_question(self, node, state: AnimaState) -> None:
         perms = self._trust.get_permissions()
+
+        # 权限检查
         if not perms.auto_execute_routine and node.source != QuestionSource.OWNER:
             self._qtree.abandon(node.id, "信任等级不足，等待主人指示")
+            await emit_question(
+                "问题被搁置",
+                f"{node.question[:50]}（信任度不足）",
+                data={"reason": "trust_insufficient"},
+            )
             return
 
         self._qtree.start(node.id)
+        await emit_question(
+            "开始处理问题",
+            node.question[:80],
+            data={"id": node.id, "priority": node.priority, "source": node.source.value},
+        )
+
+        # ── 组装上下文 ───────────────────────────────────────
+        await emit_memory("检索相关记忆", f"查询: {node.question[:40]}...")
+
         ctx = self._memory.build_context(
             identity_prompt=self._identity.build_identity_prompt(state.identity),
             recent_messages=[], query_hint=node.question,
         )
         system_prompt = self._memory.format_context_as_system_prompt(ctx)
-        methodology = self._evo.find_methodology(node.question)
-        method_hint = f"\n\n参考已有方法论：{methodology.method}" if methodology else ""
 
-        think_prompt = f"当前问题：{node.question}\n优先级：{node.priority:.0%}{method_hint}\n\n请给出简洁行动方案（不超过200字）。"
+        injected_count = len(ctx.injected_memories)
+        if injected_count > 0:
+            await emit_memory(
+                f"注入 {injected_count} 条相关记忆",
+                "；".join(m.entry.content[:30] for m in ctx.injected_memories[:3]),
+            )
+
+        # ── 查询已有方法论 ───────────────────────────────────
+        methodology = self._evo.find_methodology(node.question)
+        method_hint = ""
+        if methodology:
+            method_hint = f"\n\n参考已有方法论：{methodology.method}"
+            await emit_evolution(
+                "应用已有方法论",
+                methodology.scenario[:60],
+                data={"effectiveness": methodology.effectiveness},
+            )
+
+        # ── 调用大脑思考 ─────────────────────────────────────
+        think_prompt = (
+            f"当前问题：{node.question}\n"
+            f"优先级：{node.priority:.0%}{method_hint}\n\n"
+            "请给出简洁行动方案（不超过200字）。"
+        )
+
+        await emit_thinking("正在思考...", node.question[:60])
 
         try:
             thinking = await self._brain.think(system_prompt, think_prompt)
         except Exception as e:
             logger.error(f"[MindLoop] 大脑调用失败: {e}")
             self._qtree.abandon(node.id, f"模型调用失败: {e}")
+            await emit_thinking("思考失败", str(e), data={"error": True})
             return
 
+        await emit_thinking(
+            "思考完成",
+            thinking[:120],
+            data={"full_response_length": len(thinking)},
+        )
+
+        # ── 自动发现并安装技能 ───────────────────────────────
         needed = self._skills.discover_for_task(node.question)
         installed: list[str] = []
+
         if needed and perms.auto_install_skill:
             for spec in needed:
                 skill = self._skills.install(spec["id"])
                 if skill:
                     installed.append(skill.name)
+                    await emit_skill(
+                        f"安装新技能: {skill.name}",
+                        skill.description,
+                        data={"skill_id": skill.id, "domains": skill.domains},
+                    )
 
+        # ── 自动激活新领域 ───────────────────────────────────
         new_domains = self._identity.infer_domains(state.identity, node.question)
         for domain in new_domains:
             domain_skills = self._skills.activate_domain(domain)
             installed.extend(s.name for s in domain_skills)
+            from anima.identity.engine import DOMAIN_LABELS
+            await emit_action(
+                f"激活新领域: {DOMAIN_LABELS.get(domain, domain)}",
+                f"自动安装 {len(domain_skills)} 个必备技能",
+                data={"domain": domain, "skills_installed": len(domain_skills)},
+            )
 
-        self._evo.record(action=node.question, method=thinking[:200],
-                         outcome=ExperienceOutcome.PARTIAL, question_id=node.id)
+        # ── 记录经历 ─────────────────────────────────────────
+        self._evo.record(
+            action=node.question, method=thinking[:200],
+            outcome=ExperienceOutcome.PARTIAL, question_id=node.id,
+        )
+
+        # ── 标记问题完成 ─────────────────────────────────────
         self._qtree.resolve(node.id, thinking[:300])
+        await emit_question(
+            "问题已解决",
+            node.question[:60],
+            data={"resolution_preview": thinking[:100]},
+        )
 
-        # 衍生子问题
+        # ── 衍生子问题 ───────────────────────────────────────
         await self._spawn_children(node.id, thinking, node.priority)
 
+        # ── 通知主人 ─────────────────────────────────────────
         should_notify = (
             perms.auto_message and (
                 node.priority > 0.8
@@ -157,6 +261,7 @@ class MindLoop:
                 from anima.identity.engine import DOMAIN_LABELS
                 msg += f"\n📂 已激活新领域：{'、'.join(DOMAIN_LABELS.get(d, d) for d in new_domains)}"
             await self._notify(msg)
+            await emit_action("通知主人", msg[:80])
 
     async def _spawn_children(self, parent_id: str, thinking: str, priority: float) -> None:
         if priority < 0.4:
@@ -169,21 +274,23 @@ class MindLoop:
             for q in result.get("sub_questions", [])[:2]:
                 if q and len(q) > 5:
                     self._qtree.add_child(parent_id, q)
+                    await emit_question("衍生子问题", q[:60], data={"parent_id": parent_id})
         except Exception:
             pass
 
     async def _run_scheduled(self, state: AnimaState) -> None:
-        if self._tick_count % REFLECT_EVERY == 0:
+        if self._tick_count % REFLECT_EVERY == 0 and self._tick_count > 0:
             await self._daily_reflect(state)
-        if self._tick_count % DECAY_EVERY == 0:
+        if self._tick_count % DECAY_EVERY == 0 and self._tick_count > 0:
             decayed = self._memory.run_decay()
-            logger.info(f"[MindLoop] 记忆衰减: {decayed} 条")
+            await emit_memory(f"记忆衰减完成", f"影响 {decayed} 条记忆")
             self._trust.adjust("week_no_issues")
 
     async def _daily_reflect(self, state: AnimaState) -> None:
-        logger.info("[MindLoop] 开始每日复盘")
+        await emit_evolution("开始每日复盘", "分析近期经历，提炼方法论...")
         try:
             result = await self._evo.reflect(state, self._brain.think_json)
+
             adj = result.get("personality_adjustments", {})
             if adj.get("proactivity_delta") or adj.get("risk_tolerance_delta"):
                 self._identity.update_personality(
@@ -191,12 +298,22 @@ class MindLoop:
                     proactivity_delta=float(adj.get("proactivity_delta", 0)),
                     risk_tolerance_delta=float(adj.get("risk_tolerance_delta", 0)),
                 )
+                await emit_evolution("人格参数微调", f"主动性 Δ{adj.get('proactivity_delta', 0):+.2f}")
+
             for gap in result.get("skill_gaps", []):
-                self._qtree.add_root(f"我在「{gap}」方面能力不足，需要学习提升",
-                                     QuestionSource.SELF_REFLECTION, priority=0.55)
-            await self._notify(f"📊 每日复盘完成\n{result.get('assessment', '复盘完成')}")
+                self._qtree.add_root(
+                    f"我在「{gap}」方面能力不足，需要学习提升",
+                    QuestionSource.SELF_REFLECTION, priority=0.55,
+                )
+                await emit_evolution("发现能力短板", gap)
+
+            assessment = result.get("assessment", "复盘完成")
+            await emit_evolution("复盘完成", assessment)
+            await self._notify(f"📊 每日复盘完成\n{assessment}")
+
         except Exception as e:
             logger.error(f"[MindLoop] 复盘失败: {e}", exc_info=True)
+            await emit_evolution("复盘失败", str(e), data={"error": True})
 
     def _gen_internal_signals(self, state: AnimaState) -> list[Signal]:
         signals: list[Signal] = []
