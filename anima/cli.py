@@ -86,7 +86,6 @@ class AnimaRuntime:
             save_state=self._save_state,
             notify_owner=self._notify,
         )
-        self._channel = None
 
         # 初始化工具调度器（确保在 mind_loop 之前可用）
         from anima.tools import get_dispatcher
@@ -148,8 +147,8 @@ class AnimaRuntime:
         atomic_write_json(self._state_file, data)
 
     async def _notify(self, text: str) -> None:
-        if self._channel:
-            await self._channel.send(text)
+        if hasattr(self, '_channel_registry') and self._channel_registry.started_channels:
+            await self._channel_registry.send_to_owner(text)
         else:
             print(f"\n🔔 Anima: {text}\n")
 
@@ -202,59 +201,15 @@ class AnimaRuntime:
         )
         await server.start()
 
-        # 启动消息频道
-        channels_started = []
-
-        # ── Telegram ──────────────────────────────────────────
-        if os.getenv("TELEGRAM_BOT_TOKEN"):
-            from anima.channels.telegram import TelegramChannel
-            self._channel = TelegramChannel(
-                token=os.getenv("TELEGRAM_BOT_TOKEN"),
-                brain=self.brain,
-                owner_chat_id=os.getenv("TELEGRAM_OWNER_CHAT_ID", ""),
-            )
-            await self._channel.start()
-
-            async def on_message(sender_id: str, text: str) -> None:
-                from anima.events import emit_message
-                await emit_message("收到主人消息", text[:60])
-                ctx = self.memory.build_context(
-                    identity_prompt=self.identity.build_identity_prompt(state.identity),
-                    recent_messages=[{"role": "user", "content": text}],
-                    query_hint=text,
-                )
-                system = self.memory.format_context_as_system_prompt(ctx)
-                reply = await self.brain.think(system, text)
-                await self._channel.send(reply)
-                from anima.models import ExperienceOutcome
-                self.evo.record(action=text, method="即时对话", outcome=ExperienceOutcome.SUCCESS)
-
-            self._channel.on_message(on_message)
-            channels_started.append("Telegram")
-
-        # ── Discord ───────────────────────────────────────────
-        if os.getenv("DISCORD_BOT_TOKEN"):
-            from anima.channels.discord import DiscordChannel
-            self._discord_channel = DiscordChannel(
-                token=os.getenv("DISCORD_BOT_TOKEN"),
-                brain=self.brain,
-                owner_user_id=os.getenv("DISCORD_OWNER_USER_ID", ""),
-                guild_id=os.getenv("DISCORD_GUILD_ID"),
-            )
-            await self._discord_channel.start()
-            channels_started.append("Discord")
-
-        # ── Slack ─────────────────────────────────────────────
-        if os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"):
-            from anima.channels.slack import SlackChannel
-            self._slack_channel = SlackChannel(
-                bot_token=os.getenv("SLACK_BOT_TOKEN"),
-                app_token=os.getenv("SLACK_APP_TOKEN"),
-                brain=self.brain,
-                owner_user_id=os.getenv("SLACK_OWNER_USER_ID", ""),
-            )
-            await self._slack_channel.start()
-            channels_started.append("Slack")
+        # 启动消息频道（通过 ChannelRegistry 统一管理）
+        from anima.channels.registry import ChannelRegistry
+        self._channel_registry = ChannelRegistry(
+            brain=self.brain,
+            identity=self.identity,
+            memory=self.memory,
+            evolution=self.evo,
+        )
+        channels_started = await self._channel_registry.auto_start()
 
         if channels_started:
             print(f"  ✅ 消息频道: {', '.join(channels_started)}")
@@ -274,12 +229,8 @@ class AnimaRuntime:
         except KeyboardInterrupt:
             print(f"\n  正在停止 {name}...")
             self.loop.stop()
-            if self._channel:
-                await self._channel.stop()
-            if hasattr(self, '_discord_channel') and self._discord_channel:
-                await self._discord_channel.stop()
-            if hasattr(self, '_slack_channel') and self._slack_channel:
-                await self._slack_channel.stop()
+            if hasattr(self, '_channel_registry'):
+                await self._channel_registry.stop_all()
             lock.release()
             print("  已停止。再见！\n")
 
