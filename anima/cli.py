@@ -115,6 +115,7 @@ class AnimaRuntime:
     async def _save_state(self, state) -> None:
         from anima.utils import atomic_write_json
         data = {
+            "schema_version": 1,
             "identity": {
                 "id": state.identity.id, "name": state.identity.name,
                 "owner_id": state.identity.owner_id,

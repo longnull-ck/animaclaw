@@ -93,7 +93,8 @@ class IdentityEngine:
             "created_at": identity.created_at,
             "updated_at": identity.updated_at,
         }
-        self._identity_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        from anima.utils import atomic_write_json
+        atomic_write_json(self._identity_file, data)
 
     def infer_domains(self, identity: Identity, task_text: str) -> list[str]:
         text = task_text.lower()

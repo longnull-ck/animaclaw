@@ -90,7 +90,8 @@ class SkillRegistry:
                 "failure_cases": s.failure_cases,
                 "installed_at": s.installed_at, "updated_at": s.updated_at,
             }
-        self._file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        from anima.utils import atomic_write_json
+        atomic_write_json(self._file, data)
 
     def activate_domain(self, domain: str) -> list[Skill]:
         skills = self.load_all()

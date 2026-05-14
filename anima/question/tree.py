@@ -50,7 +50,8 @@ class QuestionTree:
                 "priority": n.priority, "depth": n.depth, "status": n.status.value,
                 "resolution": n.resolution, "created_at": n.created_at, "updated_at": n.updated_at,
             }
-        self._file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        from anima.utils import atomic_write_json
+        atomic_write_json(self._file, data)
 
     def add_root(self, question: str, source: QuestionSource, priority: float = 0.5) -> QuestionNode:
         nodes = self._load()

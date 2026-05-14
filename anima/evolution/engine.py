@@ -138,7 +138,8 @@ class EvolutionEngine:
                  "outcome": e.outcome.value, "skill_id": e.skill_id,
                  "question_id": e.question_id, "owner_satisfaction": e.owner_satisfaction,
                  "lesson": e.lesson, "created_at": e.created_at} for e in exps]
-        self._exp_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        from anima.utils import atomic_write_json
+        atomic_write_json(self._exp_file, data)
 
     def _load_methods(self) -> dict[str, Methodology]:
         if not self._method_file.exists():
@@ -151,4 +152,5 @@ class EvolutionEngine:
                       "effectiveness": m.effectiveness, "conditions": m.conditions,
                       "validation_count": m.validation_count, "updated_at": m.updated_at}
                 for mid, m in methods.items()}
-        self._method_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        from anima.utils import atomic_write_json
+        atomic_write_json(self._method_file, data)
