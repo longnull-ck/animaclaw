@@ -51,6 +51,34 @@ class MindLoop:
         self._tick_count = 0
         self._task: asyncio.Task | None = None
         self._pending_signals: list[Signal] = []
+        self._task_processor = None  # 延迟初始化
+
+    @property
+    def task_processor(self):
+        """延迟初始化通用任务处理器"""
+        if self._task_processor is None:
+            from anima.task_processor import UniversalTaskProcessor
+            from anima.task_templates import TaskTemplateStore
+            from anima.tools.dispatcher import get_dispatcher
+            import os
+            from pathlib import Path
+
+            data_dir = Path(os.getenv("ANIMA_DATA_DIR", "./data"))
+            self._task_processor = UniversalTaskProcessor(
+                brain=self._brain,
+                skill_registry=self._skills,
+                tool_dispatcher=get_dispatcher(),
+                evolution_engine=self._evo,
+                memory_manager=self._memory,
+                identity_engine=self._identity,
+                template_store=TaskTemplateStore(data_dir, brain=self._brain),
+                notify_fn=self._notify,
+            )
+        return self._task_processor
+
+    async def process_task(self, task_description: str, context: str = ""):
+        """公开接口：提交一个通用任务给任务处理器"""
+        return await self.task_processor.process_task(task_description, context)
 
     def start(self) -> None:
         if self._running:

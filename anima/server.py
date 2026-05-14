@@ -181,6 +181,13 @@ class AnimaServer:
                 comment = cmd.get("comment", "")
                 await self._handle_feedback(ws, satisfaction, comment)
 
+            elif action == "task":
+                # ── 通用任务处理：用户下达任务 ─────────────────
+                text = cmd.get("text", "").strip()
+                if not text:
+                    return
+                await self._handle_task(ws, text)
+
         except json.JSONDecodeError:
             pass
 
@@ -190,11 +197,20 @@ class AnimaServer:
         """
         WebChat 频道：用户在浏览器里发消息，Anima 思考后回复。
         全过程通过事件总线广播，前端思维流实时可见。
+
+        智能路由：如果消息看起来是一个任务（而非闲聊/提问），
+        自动转交给通用任务处理器。
         """
         from anima.events import emit_message, emit_thinking, emit_action
         from anima.models import ExperienceOutcome, Signal, SignalType
 
         await emit_message("收到用户消息", text[:60])
+
+        # ── 智能路由：判断是否为任务 ─────────────────────────
+        is_task = await self._detect_task_intent(text)
+        if is_task:
+            await self._handle_task(ws, text)
+            return
 
         # 同时注入信号到 MindLoop（让问题树也感知到）
         if self._mind_loop:
@@ -318,6 +334,103 @@ class AnimaServer:
             "level": state.level.value,
             "level_changed": level_changed,
         }, ensure_ascii=False))
+
+    # ── 通用任务处理 ─────────────────────────────────────────
+
+    # ── 任务意图检测 ────────────────────────────────────────
+
+    async def _detect_task_intent(self, text: str) -> bool:
+        """
+        判断用户消息是"任务指令"还是"闲聊/提问"。
+        任务指令 → 走通用任务处理器
+        闲聊/提问 → 走普通对话
+
+        判断依据（快速规则，不调用大模型）：
+        - 包含动作词（帮我、给我、做一下、处理、联系、发送、生成、整理...）
+        - 长度超过 20 字且包含具体对象
+        - 包含明确的指令语气
+        """
+        # 快速关键词检测（避免每次都调用大模型）
+        task_indicators = [
+            "帮我", "帮忙", "请你", "麻烦你",
+            "做一下", "处理一下", "搞定", "完成",
+            "联系", "跟进", "发送", "生成", "整理", "分析",
+            "写一", "做个", "搜一下", "查一下", "找一下",
+            "把这", "把那", "给我", "给他",
+            "发一封", "写一篇", "做一份",
+        ]
+
+        text_lower = text.lower()
+
+        # 明确的任务指示词
+        if any(kw in text_lower for kw in task_indicators):
+            # 但要排除太短的（"帮我看看这个对吗"不是任务）
+            if len(text) >= 15:
+                return True
+
+        # 如果消息很长（>50字）且有具体细节，大概率是任务
+        if len(text) > 50 and any(kw in text_lower for kw in ["电话", "微信", "邮件", "客户", "文件", "表格", "数据"]):
+            return True
+
+        return False
+
+    # ── 通用任务处理 ─────────────────────────────────────────
+
+    async def _handle_task(self, ws: web.WebSocketResponse, text: str) -> None:
+        """
+        通用任务处理入口。
+        用户在 WebChat 中下达任务，自动走 6 步闭环。
+        实时通过事件总线广播进度（前端思维流可见）。
+        """
+        # 通知前端：任务已接收，开始处理
+        await ws.send_str(json.dumps({
+            "type": "task_started",
+            "text": f"收到任务，开始处理: {text[:60]}...",
+        }, ensure_ascii=False))
+
+        try:
+            # 使用 MindLoop 的任务处理器
+            if self._mind_loop:
+                task = await self._mind_loop.process_task(text)
+            else:
+                # 降级：直接实例化处理器
+                from anima.task_processor import UniversalTaskProcessor
+                from anima.task_templates import TaskTemplateStore
+                from anima.tools.dispatcher import get_dispatcher
+                from pathlib import Path
+                import os
+
+                data_dir = Path(os.getenv("ANIMA_DATA_DIR", "./data"))
+                processor = UniversalTaskProcessor(
+                    brain=self._brain,
+                    skill_registry=self._skills,
+                    tool_dispatcher=get_dispatcher(),
+                    evolution_engine=self._evo,
+                    memory_manager=self._memory,
+                    identity_engine=self._identity,
+                    template_store=TaskTemplateStore(data_dir),
+                )
+                task = await processor.process_task(text)
+
+            # 发送最终结果
+            await ws.send_str(json.dumps({
+                "type": "task_completed",
+                "task_id": task.id,
+                "status": task.status.value,
+                "quality_score": int(task.quality_score * 100),
+                "result": task.final_result,
+                "steps_count": len(task.decomposed_steps),
+                "corrections": task.corrections_made,
+            }, ensure_ascii=False))
+
+        except Exception as e:
+            logger.error(f"[Server] task 处理失败: {e}")
+            await ws.send_str(json.dumps({
+                "type": "task_completed",
+                "status": "failed",
+                "result": f"任务处理失败: {e}",
+                "error": True,
+            }, ensure_ascii=False))
 
     # ── HTTP API 路由 ─────────────────────────────────────────
 
