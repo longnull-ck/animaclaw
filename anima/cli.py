@@ -53,6 +53,7 @@ class AnimaRuntime:
         from anima.brain import Brain
         from anima.memory.store import MemoryStore
         from anima.memory.manager import MemoryManager
+        from anima.memory.knowledge_graph import KnowledgeGraph
         from anima.identity.engine import IdentityEngine
         from anima.trust.system import TrustSystem
         from anima.skills.registry import SkillRegistry
@@ -64,7 +65,10 @@ class AnimaRuntime:
         self.providers = get_provider_registry()
         self.brain     = Brain()
         self.identity  = IdentityEngine(DATA_DIR)
-        self.memory    = MemoryManager(MemoryStore(DATA_DIR / "memory.db"))
+        self.memory    = MemoryManager(
+            MemoryStore(DATA_DIR / "memory.db"),
+            knowledge_graph=KnowledgeGraph(DATA_DIR / "knowledge.db"),
+        )
         self.trust     = TrustSystem(DATA_DIR)
         self.skills    = SkillRegistry(DATA_DIR)
         self.qtree     = QuestionTree(DATA_DIR)

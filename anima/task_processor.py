@@ -283,32 +283,90 @@ class UniversalTaskProcessor:
     # ─── Step 2: 能力自检与技能准备 ─────────────────────────
 
     async def _step2_prepare_skills(self, task: GenericTask) -> None:
-        """检查所有步骤需要的技能，自动安装缺少的"""
+        """
+        检查所有步骤需要的技能，自动安装或自造缺少的。
+
+        策略（按优先级）：
+        1. 已有工具 → 直接用
+        2. 技能目录有 → 安装
+        3. 技能目录没有 → 调用 ToolForge 自造！
+        4. 造不出来 → 标记为用大模型兜底
+        """
         all_skills = set()
         for step in task.decomposed_steps:
             all_skills.update(step.required_skills)
 
         missing = []
+        forged = []
+
         for skill_name in all_skills:
             # 检查 tool dispatcher 是否已有该工具
             if skill_name.startswith("tool_") and self._tools.has_tool(skill_name):
                 continue
-            # 检查 skill registry
+            # LLM 技能始终可用
             if skill_name.startswith("llm_"):
-                continue  # LLM 技能始终可用
+                continue
             # 尝试从技能目录安装
             installed = self._skills.install(skill_name)
             if installed:
                 await emit_skill(f"安装技能: {installed.name}", installed.description)
-            else:
-                missing.append(skill_name)
+                continue
+
+            # ── 技能目录也没有 → 尝试自造！──────────────────
+            if skill_name.startswith("tool_"):
+                # 找到需要这个技能的步骤描述，作为造工具的需求
+                need_description = self._describe_skill_need(skill_name, task)
+                forge_result = await self._try_forge_tool(skill_name, need_description)
+                if forge_result:
+                    forged.append(skill_name)
+                    continue
+
+            missing.append(skill_name)
+
+        if forged:
+            await emit_skill(
+                f"自造了 {len(forged)} 个新工具！",
+                ", ".join(forged),
+                data={"forged_tools": forged},
+            )
 
         if missing:
             await emit_skill(
-                f"部分技能不可用",
-                f"缺少: {', '.join(missing)}，将用大模型替代",
+                f"部分技能无法自造",
+                f"缺少: {', '.join(missing)}，将用大模型兜底",
                 data={"missing_skills": missing},
             )
+
+    async def _try_forge_tool(self, tool_name: str, need_description: str) -> bool:
+        """尝试用 ToolForge 自造一个工具"""
+        try:
+            from anima.tools.forge import ToolForge
+            import os
+            from pathlib import Path
+
+            data_dir = Path(os.getenv("ANIMA_DATA_DIR", "./data"))
+            forge = ToolForge(data_dir, self._brain, self._tools)
+
+            result = await forge.forge_tool(need_description, tool_name=tool_name)
+            return result.get("success", False)
+
+        except Exception as e:
+            logger.warning(f"[TaskProcessor] ToolForge 失败: {e}")
+            return False
+
+    def _describe_skill_need(self, skill_name: str, task: GenericTask) -> str:
+        """根据步骤描述，生成造工具的需求说明"""
+        descriptions = []
+        for step in task.decomposed_steps:
+            if skill_name in step.required_skills:
+                descriptions.append(step.description)
+
+        if descriptions:
+            return f"需要一个工具来完成以下操作：{'; '.join(descriptions)}"
+        else:
+            # 从工具名推断
+            clean_name = skill_name.replace("tool_", "").replace("_", " ")
+            return f"需要一个工具来执行: {clean_name}"
 
     # ─── Step 3: 生成执行计划 ────────────────────────────────
 
