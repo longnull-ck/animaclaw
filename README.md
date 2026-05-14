@@ -50,31 +50,29 @@ irm https://raw.githubusercontent.com/longnull-ck/animaclaw/main/install.ps1 | i
 git clone https://github.com/longnull-ck/animaclaw.git
 cd animaclaw
 pip install -e ".[all]"
-python run.py init       # 交互式配置
-python run.py start      # 启动
+python run.py init       # 交互式配置（只需第一次）
+python run.py start      # 启动，打开 http://localhost:3210
 ```
-
-安装脚本自动完成：检测环境 → 安装依赖 → 交互式配置 → 就绪。  
-全程不需要手动编辑任何配置文件。
-
-> **要求：** Python 3.11+，至少一个 AI 模型的 API Key
 
 ---
 
 ## 30 秒上手
 
+一行命令，装完自动启动，打开浏览器就能用：
+
+**macOS / Linux：**
 ```bash
-# 1. 初始化（设置名字、公司、API Key）
-python run.py init
-
-# 2. 启动（Web 控制中心 + 心智循环 + 消息频道）
-python run.py start
-
-# 3. 打开浏览器
-# http://localhost:3210
+curl -fsSL https://raw.githubusercontent.com/longnull-ck/animaclaw/main/install.sh | bash
 ```
 
-就这样。Anima 已经在工作了。
+**Windows（PowerShell）：**
+```powershell
+irm https://raw.githubusercontent.com/longnull-ck/animaclaw/main/install.ps1 | iex
+```
+
+装完自动打开 → **http://localhost:3210**
+
+就这样。不需要第二步。
 
 ---
 

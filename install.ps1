@@ -79,14 +79,8 @@ Write-Host ""
 & $Python -m anima.cli init
 
 Write-Host ""
-Write-Host "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
-Write-Host "  安装完成！启动 Anima："
+Write-Host "  [OK] 配置完成，正在启动 Anima..." -ForegroundColor Green
 Write-Host ""
-Write-Host "    anima start"
-Write-Host ""
-Write-Host "  或者："
-Write-Host "    python run.py start"
-Write-Host ""
-Write-Host "  然后打开浏览器：http://localhost:3210"
-Write-Host "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
-Write-Host ""
+
+# ── 自动启动 ─────────────────────────────────────────────────
+& $Python run.py start

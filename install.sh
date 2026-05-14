@@ -68,14 +68,8 @@ echo ""
 $PYTHON -m anima.cli init
 
 echo ""
-echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  安装完成！启动 Anima："
+echo "  ✅ 配置完成，正在启动 Anima..."
 echo ""
-echo "    anima start"
-echo ""
-echo "  或者："
-echo "    python run.py start"
-echo ""
-echo "  然后打开浏览器：http://localhost:3210"
-echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
+
+# ── 自动启动 ─────────────────────────────────────────────────
+$PYTHON run.py start
