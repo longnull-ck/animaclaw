@@ -184,6 +184,9 @@ class AnimaRuntime:
         name = state.identity.name
         print(f"\n🚀 {name} 启动中...\n")
 
+        channels_started = []
+
+        # ── Telegram 频道 ─────────────────────────────────────
         if os.getenv("TELEGRAM_BOT_TOKEN"):
             from anima.channels.telegram import TelegramChannel
             self._channel = TelegramChannel(
@@ -205,9 +208,39 @@ class AnimaRuntime:
                 self.evo.record(action=text, method="即时对话", outcome=ExperienceOutcome.SUCCESS)
 
             self._channel.on_message(on_message)
+            channels_started.append("Telegram")
             print("✅ Telegram 频道已连接")
+
+        # ── Discord 频道 ──────────────────────────────────────
+        if os.getenv("DISCORD_BOT_TOKEN"):
+            from anima.channels.discord import DiscordChannel
+            self._discord_channel = DiscordChannel(
+                token=os.getenv("DISCORD_BOT_TOKEN"),
+                brain=self.brain,
+                owner_user_id=os.getenv("DISCORD_OWNER_USER_ID", ""),
+                guild_id=os.getenv("DISCORD_GUILD_ID"),
+            )
+            await self._discord_channel.start()
+            channels_started.append("Discord")
+            print("✅ Discord 频道已连接")
+
+        # ── Slack 频道 ────────────────────────────────────────
+        if os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"):
+            from anima.channels.slack import SlackChannel
+            self._slack_channel = SlackChannel(
+                bot_token=os.getenv("SLACK_BOT_TOKEN"),
+                app_token=os.getenv("SLACK_APP_TOKEN"),
+                brain=self.brain,
+                owner_user_id=os.getenv("SLACK_OWNER_USER_ID", ""),
+            )
+            await self._slack_channel.start()
+            channels_started.append("Slack")
+            print("✅ Slack 频道已连接")
+
+        if not channels_started:
+            print("ℹ️  未配置任何消息频道，消息将输出到控制台")
         else:
-            print("ℹ️  未配置 Telegram，消息将输出到控制台")
+            print(f"📡 已启动频道: {', '.join(channels_started)}")
 
         self.loop.start()
         print(f"✅ 心跳循环已启动（每5分钟感知一次）")
@@ -221,6 +254,10 @@ class AnimaRuntime:
             self.loop.stop()
             if self._channel:
                 await self._channel.stop()
+            if hasattr(self, '_discord_channel') and self._discord_channel:
+                await self._discord_channel.stop()
+            if hasattr(self, '_slack_channel') and self._slack_channel:
+                await self._slack_channel.stop()
             print("已停止。再见！\n")
 
     async def cmd_status(self) -> None:
