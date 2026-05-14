@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,52 @@ if TYPE_CHECKING:
 logger = logging.getLogger("anima.server")
 
 STATIC_DIR = Path(__file__).parent.parent / "web" / "dist"
+
+# ── API 认证 ──────────────────────────────────────────────────
+
+API_TOKEN = os.getenv("ANIMA_API_TOKEN", "")
+
+
+def _check_auth(request: web.Request) -> bool:
+    """
+    检查请求是否携带正确的认证 Token。
+    如果 ANIMA_API_TOKEN 未设置（空字符串），则跳过认证（本地开发模式）。
+    """
+    if not API_TOKEN:
+        return True
+
+    # 支持 Bearer Token 和 query param 两种方式
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:] == API_TOKEN
+
+    # query param fallback（方便 WebSocket 连接）
+    token_param = request.query.get("token", "")
+    if token_param:
+        return token_param == API_TOKEN
+
+    return False
+
+
+@web.middleware
+async def auth_middleware(request: web.Request, handler):
+    """
+    API 认证中间件。
+    保护 /api/* 和 /ws 端点。静态文件不需要认证。
+    """
+    path = request.path
+
+    # 静态文件和 SPA fallback 不需要认证
+    if not (path.startswith("/api/") or path == "/ws"):
+        return await handler(request)
+
+    if not _check_auth(request):
+        return web.json_response(
+            {"error": "Unauthorized. Set ANIMA_API_TOKEN or provide Bearer token."},
+            status=401,
+        )
+
+    return await handler(request)
 
 
 class AnimaServer:
@@ -69,7 +116,7 @@ class AnimaServer:
         self._mind_loop = mind_loop
         self._host = host
         self._port = port
-        self._app = web.Application()
+        self._app = web.Application(middlewares=[auth_middleware])
         self._ws_clients: list[web.WebSocketResponse] = []
         self._chat_history: list[dict] = []   # WebChat 对话历史
         self._setup_routes()

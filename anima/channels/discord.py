@@ -179,10 +179,19 @@ class DiscordChannel(BaseChannel):
         try:
             # 发送"正在输入"状态
             async with message.channel.typing():
-                response = await self.brain.think(
-                    "你是一个全能型AI员工，简洁友好地回复用户消息。",
-                    text,
-                )
+                # 优先使用 MessageRouter（统一上下文：身份+记忆+进化追踪）
+                if self._router:
+                    response = await self._router.route(
+                        text,
+                        channel="discord",
+                        sender_id=str(message.author.id),
+                    )
+                else:
+                    # 降级：直接调用 brain（无上下文注入）
+                    response = await self.brain.think(
+                        "你是一个全能型AI员工，简洁友好地回复用户消息。",
+                        text,
+                    )
 
             if response:
                 for chunk in self._split_message(response):
