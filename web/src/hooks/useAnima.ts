@@ -37,6 +37,7 @@ export interface UseAnimaResult {
   events: AnimaEvent[]
   snapshot: AnimaSnapshot | null
   sendCommand: (action: string, data?: Record<string, unknown>) => void
+  onWsMessage: (handler: (msg: any) => void) => () => void
 }
 
 const WS_URL = `ws://${window.location.hostname}:${window.location.port || '3210'}/ws`
@@ -47,6 +48,7 @@ export function useAnima(): UseAnimaResult {
   const [snapshot, setSnapshot] = useState<AnimaSnapshot | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>()
+  const messageHandlersRef = useRef<Set<(msg: any) => void>>(new Set())
 
   const connect = useCallback(() => {
     const ws = new WebSocket(WS_URL)
@@ -61,6 +63,9 @@ export function useAnima(): UseAnimaResult {
       try {
         const msg = JSON.parse(e.data)
 
+        // 派发给所有外部处理器（ChatPanel 等）
+        messageHandlersRef.current.forEach(handler => handler(msg))
+
         if (msg.type === 'history') {
           // 历史事件回放
           setEvents(msg.events || [])
@@ -69,6 +74,10 @@ export function useAnima(): UseAnimaResult {
           setSnapshot(msg.data)
         } else if (msg.type === 'pong') {
           // heartbeat response
+        } else if (msg.type?.startsWith('chat_')) {
+          // chat 相关消息由 ChatPanel 的 handler 处理，不加入事件流
+        } else if (msg.type === 'feedback_result') {
+          // 反馈结果由 handler 处理
         } else {
           // 新实时事件
           setEvents(prev => [...prev.slice(-199), msg])
@@ -103,5 +112,12 @@ export function useAnima(): UseAnimaResult {
     }
   }, [])
 
-  return { connected, events, snapshot, sendCommand }
+  const onWsMessage = useCallback((handler: (msg: any) => void) => {
+    messageHandlersRef.current.add(handler)
+    return () => {
+      messageHandlersRef.current.delete(handler)
+    }
+  }, [])
+
+  return { connected, events, snapshot, sendCommand, onWsMessage }
 }

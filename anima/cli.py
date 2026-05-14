@@ -179,6 +179,8 @@ class AnimaRuntime:
             question_tree=self.qtree,
             evolution=self.evo,
             providers=self.providers,
+            brain=self.brain,
+            mind_loop=self.loop,
             port=port,
         )
         await server.start()

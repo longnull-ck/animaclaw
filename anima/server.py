@@ -53,6 +53,8 @@ class AnimaServer:
         question_tree: "QuestionTree",
         evolution: "EvolutionEngine",
         providers: "ProviderRegistry",
+        brain=None,
+        mind_loop=None,
         host: str = "0.0.0.0",
         port: int = 3210,
     ):
@@ -63,10 +65,13 @@ class AnimaServer:
         self._qtree = question_tree
         self._evo = evolution
         self._providers = providers
+        self._brain = brain
+        self._mind_loop = mind_loop
         self._host = host
         self._port = port
         self._app = web.Application()
         self._ws_clients: list[web.WebSocketResponse] = []
+        self._chat_history: list[dict] = []   # WebChat 对话历史
         self._setup_routes()
         self._setup_event_forwarding()
 
@@ -156,8 +161,163 @@ class AnimaServer:
                 snapshot = self._build_snapshot()
                 await ws.send_str(json.dumps({"type": "snapshot", "data": snapshot}, ensure_ascii=False))
 
+            elif action == "chat":
+                # ── WebChat：用户在浏览器里直接对话 ────────────
+                text = cmd.get("text", "").strip()
+                if not text:
+                    return
+                await self._handle_chat(ws, text)
+
+            elif action == "chat_stream":
+                # ── WebChat 流式：逐 token 返回 ───────────────
+                text = cmd.get("text", "").strip()
+                if not text:
+                    return
+                await self._handle_chat_stream(ws, text)
+
+            elif action == "feedback":
+                # ── 快捷反馈（👍👎）─────────────────────────────
+                satisfaction = float(cmd.get("satisfaction", 0.7))
+                comment = cmd.get("comment", "")
+                await self._handle_feedback(ws, satisfaction, comment)
+
         except json.JSONDecodeError:
             pass
+
+    # ── WebChat 对话处理 ──────────────────────────────────────
+
+    async def _handle_chat(self, ws: web.WebSocketResponse, text: str) -> None:
+        """
+        WebChat 频道：用户在浏览器里发消息，Anima 思考后回复。
+        全过程通过事件总线广播，前端思维流实时可见。
+        """
+        from anima.events import emit_message, emit_thinking, emit_action
+        from anima.models import ExperienceOutcome, Signal, SignalType
+
+        await emit_message("收到用户消息", text[:60])
+
+        # 同时注入信号到 MindLoop（让问题树也感知到）
+        if self._mind_loop:
+            self._mind_loop.inject_signal(Signal(
+                type=SignalType.MESSAGE,
+                payload={"content": text, "source": "webchat"},
+                strength=0.9,
+            ))
+
+        try:
+            # 构建上下文
+            identity = self._identity.load()
+            ctx = self._memory.build_context(
+                identity_prompt=self._identity.build_identity_prompt(identity),
+                recent_messages=self._chat_history[-10:] + [{"role": "user", "content": text}],
+                query_hint=text,
+            )
+            system_prompt = self._memory.format_context_as_system_prompt(ctx)
+
+            await emit_thinking("正在思考回复...", text[:40])
+
+            # 调用大脑
+            reply = await self._brain.think(system_prompt, text)
+
+            await emit_action("回复用户", reply[:80])
+
+            # 记录对话历史
+            self._chat_history.append({"role": "user", "content": text})
+            self._chat_history.append({"role": "assistant", "content": reply})
+            if len(self._chat_history) > 40:
+                self._chat_history = self._chat_history[-40:]
+
+            # 记录经历
+            self._evo.record(action=text, method="WebChat对话", outcome=ExperienceOutcome.SUCCESS)
+
+            # 发送回复给前端
+            await ws.send_str(json.dumps({
+                "type": "chat_reply",
+                "text": reply,
+                "model": self._brain.active_model if hasattr(self._brain, 'active_model') else "unknown",
+            }, ensure_ascii=False))
+
+        except Exception as e:
+            logger.error(f"[Server] chat 处理失败: {e}")
+            await ws.send_str(json.dumps({
+                "type": "chat_reply",
+                "text": f"[处理失败: {e}]",
+                "error": True,
+            }, ensure_ascii=False))
+
+    async def _handle_chat_stream(self, ws: web.WebSocketResponse, text: str) -> None:
+        """WebChat 流式对话：逐 token 返回，前端实时显示打字效果"""
+        from anima.events import emit_message, emit_thinking
+
+        await emit_message("收到用户消息（流式）", text[:60])
+
+        try:
+            identity = self._identity.load()
+            ctx = self._memory.build_context(
+                identity_prompt=self._identity.build_identity_prompt(identity),
+                recent_messages=self._chat_history[-10:] + [{"role": "user", "content": text}],
+                query_hint=text,
+            )
+            system_prompt = self._memory.format_context_as_system_prompt(ctx)
+
+            await emit_thinking("正在流式回复...", text[:40])
+
+            # 流式标记开始
+            await ws.send_str(json.dumps({"type": "chat_stream_start"}, ensure_ascii=False))
+
+            full_reply = ""
+            async for chunk in self._brain.think_stream(system_prompt, text):
+                full_reply += chunk
+                await ws.send_str(json.dumps({
+                    "type": "chat_stream_chunk",
+                    "text": chunk,
+                }, ensure_ascii=False))
+
+            # 流式标记结束
+            await ws.send_str(json.dumps({"type": "chat_stream_end"}, ensure_ascii=False))
+
+            # 记录对话历史
+            self._chat_history.append({"role": "user", "content": text})
+            self._chat_history.append({"role": "assistant", "content": full_reply})
+            if len(self._chat_history) > 40:
+                self._chat_history = self._chat_history[-40:]
+
+            from anima.models import ExperienceOutcome
+            self._evo.record(action=text, method="WebChat流式对话", outcome=ExperienceOutcome.SUCCESS)
+
+        except Exception as e:
+            logger.error(f"[Server] chat_stream 处理失败: {e}")
+            await ws.send_str(json.dumps({
+                "type": "chat_stream_end",
+                "error": str(e),
+            }, ensure_ascii=False))
+
+    async def _handle_feedback(self, ws: web.WebSocketResponse, satisfaction: float, comment: str) -> None:
+        """处理前端发来的快捷反馈"""
+        from anima.events import emit_trust
+
+        reason = (
+            "owner_explicit_trust" if satisfaction >= 0.9
+            else "task_success" if satisfaction >= 0.6
+            else "owner_frustrated"
+        )
+        state, level_changed, old_level = self._trust.adjust(reason, note=comment)
+        self._memory.remember(
+            content=f"主人反馈（满意度{int(satisfaction*100)}%）：{comment or '无说明'}",
+            importance=0.7, tags=["feedback"],
+        )
+
+        await emit_trust(
+            f"信任度变化: {int(state.score*100)}分",
+            f"{'升级!' if level_changed else ''} {comment}" if comment else "",
+        )
+
+        await ws.send_str(json.dumps({
+            "type": "feedback_result",
+            "score": int(state.score * 100),
+            "level": state.level.value,
+            "level_changed": level_changed,
+        }, ensure_ascii=False))
 
     # ── HTTP API 路由 ─────────────────────────────────────────
 
