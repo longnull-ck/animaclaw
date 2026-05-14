@@ -180,6 +180,10 @@ class AnimaRuntime:
         print(f"\n运行 'python run.py start' 启动 Anima\n")
 
     async def cmd_start(self) -> None:
+        # 环境配置校验
+        from anima.config import require_config_or_exit
+        config_result = require_config_or_exit()
+
         state = await self._load_state()
         name = state.identity.name
         print(f"\n🚀 {name} 启动中...\n")
@@ -324,6 +328,15 @@ class AnimaRuntime:
             from anima.models import ExperienceOutcome
             self.evo.record(action=user_input, method="命令行对话", outcome=ExperienceOutcome.SUCCESS)
 
+    async def cmd_doctor(self) -> None:
+        """诊断命令：检查环境配置"""
+        from anima.config import validate_config
+        result = validate_config()
+        if result["ok"]:
+            print("✅ 所有检查通过，可以正常启动！")
+        else:
+            print("❌ 存在问题，请修复后再启动。")
+
     async def cmd_feedback(self) -> None:
         print("\n📝 给 Anima 反馈\n")
         satisfaction = float(input("满意度 (0-10): ").strip()) / 10
@@ -353,6 +366,7 @@ async def main() -> None:
         "status": runtime.cmd_status,
         "chat": runtime.cmd_chat,
         "feedback": runtime.cmd_feedback,
+        "doctor": runtime.cmd_doctor,
     }
     if cmd not in commands:
         print(f"未知命令: {cmd}\n可用命令: {', '.join(commands)}")
