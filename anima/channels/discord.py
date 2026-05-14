@@ -179,7 +179,10 @@ class DiscordChannel(BaseChannel):
         try:
             # 发送"正在输入"状态
             async with message.channel.typing():
-                response = await self.brain.process(signal)
+                response = await self.brain.think(
+                    "你是一个全能型AI员工，简洁友好地回复用户消息。",
+                    text,
+                )
 
             if response:
                 for chunk in self._split_message(response):

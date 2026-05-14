@@ -242,10 +242,11 @@ class Brain:
         system_prompt: str, user_prompt: str,
         temperature: float, max_tokens: int,
     ) -> str:
-        url = (
-            f"{provider.base_url}/models/{provider.model}:generateContent"
-            f"?key={provider.api_key}"
-        )
+        url = f"{provider.base_url}/models/{provider.model}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": provider.api_key,
+        }
         payload = {
             "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}],
             "generationConfig": {
@@ -255,7 +256,7 @@ class Brain:
         }
 
         async with httpx.AsyncClient(timeout=provider.timeout) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
 

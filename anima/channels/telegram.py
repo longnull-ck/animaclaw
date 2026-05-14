@@ -14,11 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramChannel(BaseChannel):
-    def __init__(self, token: str, brain, owner_chat_id: str):
+    def __init__(self, token: str, brain, owner_chat_id: str, **kwargs):
+        """
+        Args:
+            token: Telegram Bot Token
+            brain: Anima Brain instance (provides think() method)
+            owner_chat_id: Owner's Telegram Chat ID
+            **kwargs: Accept extra args for compatibility (e.g. owner_id, inject_signal_fn)
+        """
         self.token = token
         self.brain = brain
         self.owner_chat_id = owner_chat_id
         self._app = None
+        self._message_callback = None
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -69,15 +77,32 @@ class TelegramChannel(BaseChannel):
     # 消息回调
     # ------------------------------------------------------------------
 
+    def on_message(self, callback) -> None:
+        """Register a callback for incoming messages: callback(sender_id, text)"""
+        self._message_callback = callback
+
     async def _on_message(self, update, context) -> None:
         if not update.message or not update.message.text:
             return
         chat_id = str(update.message.chat_id)
         text = update.message.text
 
+        # If external callback registered (from run.py/cli.py), use it
+        if self._message_callback:
+            try:
+                await self._message_callback(chat_id, text)
+            except Exception as exc:
+                logger.error("Error in message callback: %s", exc)
+                await self.send(chat_id, "抱歉，处理您的消息时出现了错误。")
+            return
+
+        # Fallback: use brain.think() directly
         signal = self.to_signal({"chat_id": chat_id, "text": text})
         try:
-            response = await self.brain.process(signal)
+            response = await self.brain.think(
+                "你是一个全能型AI员工，简洁地回复用户消息。",
+                text,
+            )
             if response:
                 await self.send(chat_id, response)
         except Exception as exc:

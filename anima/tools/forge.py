@@ -409,18 +409,36 @@ sys.exit(0 if result else 1)
         logger.info(f"[ToolForge] 工具已保存: {name} → {tool_file}")
 
     def _register_tool(self, name: str, code: str) -> None:
-        """动态注册工具到 Dispatcher"""
-        # 创建一个模块命名空间并执行代码
-        namespace = {}
-        exec(code, namespace)
+        """Dynamic tool registration using isolated module import (no exec)"""
+        import tempfile
+        import importlib.util
 
-        # 找到工具函数
-        tool_fn = namespace.get(name)
-        if tool_fn and callable(tool_fn):
-            self._dispatcher.register(name, tool_fn)
-            logger.info(f"[ToolForge] 工具已注册: {name}")
-        else:
-            logger.warning(f"[ToolForge] 注册失败: 在代码中找不到函数 {name}")
+        # Write code to a temp file and import as module (safer than exec)
+        tool_file = self._tools_dir / f"{name}.py"
+        if not tool_file.exists():
+            tool_file.write_text(code, encoding="utf-8")
+
+        try:
+            spec = importlib.util.spec_from_file_location(f"anima.forged.{name}", str(tool_file))
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                # Restrict dangerous builtins in the module
+                restricted_builtins = dict(__builtins__) if isinstance(__builtins__, dict) else vars(__builtins__).copy()
+                for dangerous in ("exec", "eval", "compile", "__import__"):
+                    restricted_builtins.pop(dangerous, None)
+                module.__builtins__ = restricted_builtins
+                spec.loader.exec_module(module)
+
+                tool_fn = getattr(module, name, None)
+                if tool_fn and callable(tool_fn):
+                    self._dispatcher.register(name, tool_fn)
+                    logger.info(f"[ToolForge] Tool registered: {name}")
+                else:
+                    logger.warning(f"[ToolForge] Registration failed: function {name} not found in code")
+            else:
+                logger.warning(f"[ToolForge] Could not create module spec for {name}")
+        except Exception as e:
+            logger.error(f"[ToolForge] Failed to load tool {name}: {e}")
 
     # ─── 启动时加载已有工具 ───────────────────────────────────
 

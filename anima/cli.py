@@ -113,6 +113,7 @@ class AnimaRuntime:
         )
 
     async def _save_state(self, state) -> None:
+        from anima.utils import atomic_write_json
         data = {
             "identity": {
                 "id": state.identity.id, "name": state.identity.name,
@@ -143,9 +144,7 @@ class AnimaRuntime:
             "tick_count": state.tick_count,
             "last_tick_at": state.last_tick_at,
         }
-        self._state_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        atomic_write_json(self._state_file, data)
 
     async def _notify(self, text: str) -> None:
         if self._channel:
@@ -161,6 +160,15 @@ class AnimaRuntime:
         """启动 Anima Gateway（心跳 + Web 控制中心 + 频道）"""
         from anima.events import emit_system
         from anima.server import AnimaServer
+        from anima.utils import ProcessLock
+
+        # Prevent multiple instances
+        lock = ProcessLock(DATA_DIR / "anima.lock")
+        if not lock.acquire():
+            print("\n  ❌ Another Anima instance is already running!")
+            print(f"     Lock file: {DATA_DIR / 'anima.lock'}")
+            print("     Stop the other instance first, or delete the lock file.\n")
+            return
 
         state = await self._load_state()
         name = state.identity.name
@@ -200,8 +208,9 @@ class AnimaRuntime:
         if os.getenv("TELEGRAM_BOT_TOKEN"):
             from anima.channels.telegram import TelegramChannel
             self._channel = TelegramChannel(
-                owner_id="owner_001",
-                inject_signal_fn=self.loop.inject_signal,
+                token=os.getenv("TELEGRAM_BOT_TOKEN"),
+                brain=self.brain,
+                owner_chat_id=os.getenv("TELEGRAM_OWNER_CHAT_ID", ""),
             )
             await self._channel.start()
 
@@ -270,6 +279,7 @@ class AnimaRuntime:
                 await self._discord_channel.stop()
             if hasattr(self, '_slack_channel') and self._slack_channel:
                 await self._slack_channel.stop()
+            lock.release()
             print("  已停止。再见！\n")
 
     # ─────────────────────────────────────────────────────────

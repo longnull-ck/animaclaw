@@ -196,7 +196,10 @@ class SlackChannel(BaseChannel):
         })
 
         try:
-            response = await self.brain.process(signal)
+            response = await self.brain.think(
+                "你是一个全能型AI员工，简洁友好地回复用户消息。",
+                text,
+            )
             if response:
                 # 在线程中回复（保持上下文）
                 thread_ts = event.get("thread_ts") or event.get("ts") if not is_dm else None

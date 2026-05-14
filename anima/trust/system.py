@@ -76,13 +76,14 @@ class TrustSystem:
         return TrustState(**raw)
 
     def save(self, state: TrustState) -> None:
+        from anima.utils import atomic_write_json
         data = {
             "score": state.score, "level": state.level.value,
             "history": [{"delta": e.delta, "reason": e.reason, "timestamp": e.timestamp}
                         for e in state.history],
             "updated_at": state.updated_at,
         }
-        self._file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(self._file, data)
 
     def adjust(self, reason_key: str, custom_delta: float | None = None,
                note: str = "") -> tuple[TrustState, bool, TrustLevel]:
@@ -105,11 +106,11 @@ class TrustSystem:
     def progress_summary(self) -> dict:
         state = self.load()
         current = next(t for t in LEVEL_THRESHOLDS if t[0] == state.level)
-        next_t = next((t for t in LEVEL_THRESHOLDS if t[1] >= current[2]), None)
+        next_t = next((t for t in LEVEL_THRESHOLDS if t[1] > current[1] and t[0] != state.level), None)
         return {
             "score": int(state.score * 100),
             "level": state.level.value,
             "label": LEVEL_LABELS[state.level],
             "next_level": next_t[0].value if next_t else None,
-            "points_to_next": int((current[2] - state.score) * 100) if next_t else None,
+            "points_to_next": int((current[2] - state.score) * 100) if next_t else 0,
         }
