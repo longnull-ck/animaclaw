@@ -83,8 +83,18 @@ async def tool_bash(args: dict) -> str:
     os.makedirs(cwd, exist_ok=True)
 
     try:
+        # Build command with resource limits on Linux
+        if platform.system() != "Windows":
+            # ulimit: 60s CPU, 256MB virtual memory, 1024 max processes, 50MB file size
+            limited_cmd = (
+                f"ulimit -t 60 -v 262144 -u 1024 -f 51200 2>/dev/null; "
+                f"exec {command}"
+            )
+        else:
+            limited_cmd = command
+
         process = await asyncio.create_subprocess_shell(
-            command,
+            limited_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,

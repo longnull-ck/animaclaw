@@ -39,6 +39,14 @@ class ProviderConfig:
     # 是否启用
     enabled: bool = True
 
+    def __repr__(self) -> str:
+        """Custom repr that masks api_key to prevent accidental logging."""
+        masked_key = self.api_key[:4] + "***" if len(self.api_key) > 4 else "***"
+        return (
+            f"ProviderConfig(name={self.name!r}, model={self.model!r}, "
+            f"api_key={masked_key!r}, base_url={self.base_url!r})"
+        )
+
 
 @dataclass
 class ProviderUsage:

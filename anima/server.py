@@ -120,6 +120,10 @@ class AnimaServer:
         self._ws_clients.append(ws)
         logger.info(f"[Server] WebSocket 客户端连接（当前 {len(self._ws_clients)} 个）")
 
+        # Per-client rate limiter state
+        import time
+        rate_state = {"tokens": 10.0, "last_refill": time.monotonic()}
+
         # 发送历史事件回放
         bus = get_event_bus()
         history = bus.get_history(50)
@@ -138,6 +142,20 @@ class AnimaServer:
         try:
             async for msg in ws:
                 if msg.type == web.WSMsgType.TEXT:
+                    # Rate limiting: token bucket (10 msg/s, burst 20)
+                    now = time.monotonic()
+                    elapsed = now - rate_state["last_refill"]
+                    rate_state["tokens"] = min(20.0, rate_state["tokens"] + elapsed * 10.0)
+                    rate_state["last_refill"] = now
+
+                    if rate_state["tokens"] < 1.0:
+                        await ws.send_str(json.dumps({
+                            "type": "error",
+                            "message": "Rate limit exceeded. Please slow down.",
+                        }))
+                        continue
+
+                    rate_state["tokens"] -= 1.0
                     # 处理前端发来的命令
                     await self._handle_ws_command(ws, msg.data)
                 elif msg.type == web.WSMsgType.ERROR:
