@@ -189,7 +189,10 @@ class AnimaRuntime:
         )
         await server.start()
 
-        # 启动 Telegram 频道（如果配置了）
+        # 启动消息频道
+        channels_started = []
+
+        # ── Telegram ──────────────────────────────────────────
         if os.getenv("TELEGRAM_BOT_TOKEN"):
             from anima.channels.telegram import TelegramChannel
             self._channel = TelegramChannel(
@@ -213,7 +216,36 @@ class AnimaRuntime:
                 self.evo.record(action=text, method="即时对话", outcome=ExperienceOutcome.SUCCESS)
 
             self._channel.on_message(on_message)
-            print("  ✅ Telegram 频道已连接")
+            channels_started.append("Telegram")
+
+        # ── Discord ───────────────────────────────────────────
+        if os.getenv("DISCORD_BOT_TOKEN"):
+            from anima.channels.discord import DiscordChannel
+            self._discord_channel = DiscordChannel(
+                token=os.getenv("DISCORD_BOT_TOKEN"),
+                brain=self.brain,
+                owner_user_id=os.getenv("DISCORD_OWNER_USER_ID", ""),
+                guild_id=os.getenv("DISCORD_GUILD_ID"),
+            )
+            await self._discord_channel.start()
+            channels_started.append("Discord")
+
+        # ── Slack ─────────────────────────────────────────────
+        if os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"):
+            from anima.channels.slack import SlackChannel
+            self._slack_channel = SlackChannel(
+                bot_token=os.getenv("SLACK_BOT_TOKEN"),
+                app_token=os.getenv("SLACK_APP_TOKEN"),
+                brain=self.brain,
+                owner_user_id=os.getenv("SLACK_OWNER_USER_ID", ""),
+            )
+            await self._slack_channel.start()
+            channels_started.append("Slack")
+
+        if channels_started:
+            print(f"  ✅ 消息频道: {', '.join(channels_started)}")
+        else:
+            print("  ℹ️  未配置消息频道（仅 Web 控制中心可用）")
 
         # 启动心跳循环
         self.loop.start()
@@ -230,6 +262,10 @@ class AnimaRuntime:
             self.loop.stop()
             if self._channel:
                 await self._channel.stop()
+            if hasattr(self, '_discord_channel') and self._discord_channel:
+                await self._discord_channel.stop()
+            if hasattr(self, '_slack_channel') and self._slack_channel:
+                await self._slack_channel.stop()
             print("  已停止。再见！\n")
 
     # ─────────────────────────────────────────────────────────
@@ -361,6 +397,14 @@ class AnimaRuntime:
         # 检查 Telegram
         has_tg = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
         checks.append(("Telegram", has_tg, "已配置" if has_tg else "未配置（可选）"))
+
+        # 检查 Discord
+        has_dc = bool(os.getenv("DISCORD_BOT_TOKEN"))
+        checks.append(("Discord", has_dc, "已配置" if has_dc else "未配置（可选）"))
+
+        # 检查 Slack
+        has_slack = bool(os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"))
+        checks.append(("Slack", has_slack, "已配置" if has_slack else "未配置（可选）"))
 
         # 输出结果
         for name, ok, detail in checks:

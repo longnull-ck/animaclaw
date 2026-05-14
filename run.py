@@ -188,6 +188,26 @@ class AnimaRuntime:
         name = state.identity.name
         print(f"\n🚀 {name} 启动中...\n")
 
+        # ── 启动 Web 服务器（API + WebSocket + 前端） ─────────
+        from anima.server import AnimaServer
+        from anima.providers.registry import get_provider_registry
+        providers = get_provider_registry()
+
+        server = AnimaServer(
+            identity=self.identity,
+            memory=self.memory,
+            trust=self.trust,
+            skills=self.skills,
+            question_tree=self.qtree,
+            evolution=self.evo,
+            providers=providers,
+            brain=self.brain,
+            mind_loop=self.loop,
+            port=3210,
+        )
+        await server.start()
+        print("✅ Web 控制中心已启动: http://localhost:3210")
+
         channels_started = []
 
         # ── Telegram 频道 ─────────────────────────────────────
