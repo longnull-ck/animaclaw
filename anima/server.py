@@ -537,17 +537,42 @@ class AnimaServer:
         except Exception:
             identity_data = None
 
-        return {
-            "identity": identity_data,
-            "trust": self._trust.progress_summary(),
-            "skills": [
+        try:
+            trust_data = self._trust.progress_summary()
+        except Exception:
+            trust_data = {"score": 0, "level": "probation", "label": "未初始化", "next_level": None, "points_to_next": 0}
+
+        try:
+            skills_data = [
                 {"id": s.id, "name": s.name, "proficiency": s.proficiency,
                  "success_rate": s.success_rate, "use_count": s.use_count}
                 for s in self._skills.get_active()
-            ],
-            "questions": self._qtree.stats(),
-            "evolution": self._evo.stats(),
-            "providers": self._providers.summary(),
+            ]
+        except Exception:
+            skills_data = []
+
+        try:
+            questions_data = self._qtree.stats()
+        except Exception:
+            questions_data = {"pending": 0, "resolved": 0, "total": 0}
+
+        try:
+            evolution_data = self._evo.stats()
+        except Exception:
+            evolution_data = {"total_experiences": 0, "success_rate": 0, "methodology_count": 0}
+
+        try:
+            providers_data = self._providers.summary()
+        except Exception:
+            providers_data = {"total_providers": 0, "enabled": 0, "active": None, "providers": []}
+
+        return {
+            "identity": identity_data,
+            "trust": trust_data,
+            "skills": skills_data,
+            "questions": questions_data,
+            "evolution": evolution_data,
+            "providers": providers_data,
             "ws_clients": len(self._ws_clients),
         }
 

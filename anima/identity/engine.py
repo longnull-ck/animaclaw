@@ -71,8 +71,10 @@ class IdentityEngine:
     def load(self) -> Identity:
         raw = json.loads(self._identity_file.read_text(encoding="utf-8"))
         p = raw.pop("personality", {})
-        raw["personality"] = Personality(**p)
-        return Identity(**raw)
+        raw["personality"] = Personality(**{k: v for k, v in p.items() if k in
+            ("proactivity", "risk_tolerance", "language", "communication_style")})
+        from anima.models import safe_init
+        return safe_init(Identity, raw)
 
     def save(self, identity: Identity) -> None:
         data = {

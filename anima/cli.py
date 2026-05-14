@@ -97,15 +97,15 @@ class AnimaRuntime:
             raise RuntimeError("员工尚未初始化，请先运行: anima init")
         raw = json.loads(self._state_file.read_text(encoding="utf-8"))
         from anima.models import (
-            AnimaState, TrustLevel, TrustEvent, TrustState, Personality, Identity
+            AnimaState, TrustLevel, TrustEvent, TrustState, Personality, Identity, safe_init
         )
-        p = raw["identity"].pop("personality")
-        raw["identity"]["personality"] = Personality(**p)
-        identity = Identity(**raw["identity"])
+        p = raw["identity"].pop("personality", {})
+        raw["identity"]["personality"] = safe_init(Personality, p)
+        identity = safe_init(Identity, raw["identity"])
         ts = raw["trust"]
         ts["level"] = TrustLevel(ts["level"])
-        ts["history"] = [TrustEvent(**e) for e in ts.get("history", [])]
-        trust = TrustState(**ts)
+        ts["history"] = [safe_init(TrustEvent, e) for e in ts.get("history", [])]
+        trust = safe_init(TrustState, ts)
         return AnimaState(
             identity=identity, trust=trust,
             tick_count=raw.get("tick_count", 0),

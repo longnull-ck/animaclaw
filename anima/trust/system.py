@@ -72,8 +72,9 @@ class TrustSystem:
     def load(self) -> TrustState:
         raw = json.loads(self._file.read_text(encoding="utf-8"))
         raw["level"] = TrustLevel(raw["level"])
-        raw["history"] = [TrustEvent(**e) for e in raw.get("history", [])]
-        return TrustState(**raw)
+        from anima.models import safe_init
+        raw["history"] = [safe_init(TrustEvent, e) for e in raw.get("history", [])]
+        return safe_init(TrustState, raw)
 
     def save(self, state: TrustState) -> None:
         from anima.utils import atomic_write_json

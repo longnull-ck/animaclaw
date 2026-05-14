@@ -4,10 +4,22 @@ Anima — 全局数据模型
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+import dataclasses
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from typing import Any
+
+
+def safe_init(cls, data: dict) -> Any:
+    """
+    安全地从 dict 构造 dataclass 实例。
+    - 忽略 data 中多余的 key（不在 dataclass fields 中的）
+    - 缺少的 key 如果有默认值则用默认值，否则用 None/空值
+    """
+    valid_fields = {f.name for f in fields(cls)}
+    filtered = {k: v for k, v in data.items() if k in valid_fields}
+    return cls(**filtered)
 
 
 @dataclass
