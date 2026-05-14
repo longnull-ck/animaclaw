@@ -13,6 +13,7 @@ license = { text = "MIT" }
 dependencies = [
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
+    "aiohttp>=3.9.0",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +22,11 @@ telegram = [
 ]
 all = [
     "python-telegram-bot>=21.0",
+    "aiohttp>=3.9.0",
 ]
+
+[project.scripts]
+anima = "anima.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["anima"]
