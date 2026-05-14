@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+dist/
+build/
+.venv
+venv
+.env
+
+# Node
+web/node_modules
+web/dist
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (运行时挂载)
+data/
+
+# Docs
+*.md
+LICENSE

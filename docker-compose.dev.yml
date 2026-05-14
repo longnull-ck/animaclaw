@@ -1,0 +1,42 @@
+# ============================================================
+# Anima — 开发环境 Docker Compose
+# 用法: docker compose -f docker-compose.dev.yml up
+# 特点：代码热重载、前端 dev server 独立运行
+# ============================================================
+
+services:
+  anima:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: anima-dev
+    restart: unless-stopped
+    ports:
+      - "3210:3210"
+    env_file:
+      - .env
+    environment:
+      - ANIMA_DATA_DIR=/app/data
+    volumes:
+      # 挂载源码实现热重载
+      - ./anima:/app/anima:ro
+      - ./run.py:/app/run.py:ro
+      - anima_dev_data:/app/data
+
+  # 前端开发服务器（可选，也可在宿主机运行）
+  web:
+    image: node:20-alpine
+    container_name: anima-web-dev
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:3210
+
+volumes:
+  anima_dev_data:
+  web_node_modules:

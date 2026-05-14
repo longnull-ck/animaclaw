@@ -1,0 +1,43 @@
+# ============================================================
+# Anima — Docker Compose 部署配置
+# 用法:
+#   docker compose up -d          启动
+#   docker compose logs -f anima  查看日志
+#   docker compose down           停止
+# ============================================================
+
+services:
+  anima:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: anima
+    restart: unless-stopped
+    ports:
+      - "${ANIMA_PORT:-3210}:3210"
+    env_file:
+      - .env
+    environment:
+      - ANIMA_DATA_DIR=/app/data
+    volumes:
+      # 持久化数据（身份、记忆、信任等）
+      - anima_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3210/api/status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+          cpus: "0.25"
+
+volumes:
+  anima_data:
+    driver: local
