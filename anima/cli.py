@@ -277,14 +277,115 @@ class AnimaRuntime:
     # ─────────────────────────────────────────────────────────
 
     async def cmd_init(self) -> None:
-        print("\n🦾 Anima — 全能型 AI 员工初始化\n")
-        name         = input("  员工名字（默认 Anima）: ").strip() or "Anima"
-        owner_name   = input("  您的名字（主人）: ").strip() or "主人"
+        """
+        交互式 onboarding wizard（类似 OpenClaw）。
+        一条命令完成所有配置：身份 + API Key + 消息频道 + 自动写入 .env。
+        """
+        print("""
+╔══════════════════════════════════════════════════╗
+║                                                  ║
+║   🦾 Anima — 全能型 AI 员工                      ║
+║   交互式初始化引导                                ║
+║                                                  ║
+╚══════════════════════════════════════════════════╝
+""")
+
+        # ── Step 1: 员工身份 ─────────────────────────────────
+        print("  📋 Step 1/3: 员工身份\n")
+        name = input("  员工名字（默认 Anima）: ").strip() or "Anima"
+        owner_name = input("  您的名字: ").strip() or "主人"
         company_desc = input("  公司业务描述（一两句话）: ").strip()
         if not company_desc:
             print("  ❌ 公司描述不能为空")
             return
 
+        # ── Step 2: 模型 API Key ─────────────────────────────
+        print("\n  🤖 Step 2/3: 模型配置（至少填一个）\n")
+        print("  支持的模型：DeepSeek / OpenAI / Anthropic / Google / Ollama")
+        print("  直接回车跳过不需要的\n")
+
+        env_vars: dict[str, str] = {}
+
+        deepseek_key = input("  DeepSeek API Key (sk-...): ").strip()
+        if deepseek_key:
+            env_vars["DEEPSEEK_API_KEY"] = deepseek_key
+
+        openai_key = input("  OpenAI API Key (sk-...): ").strip()
+        if openai_key:
+            env_vars["OPENAI_API_KEY"] = openai_key
+
+        anthropic_key = input("  Anthropic API Key (sk-ant-...): ").strip()
+        if anthropic_key:
+            env_vars["ANTHROPIC_API_KEY"] = anthropic_key
+
+        google_key = input("  Google Gemini Key (AI...): ").strip()
+        if google_key:
+            env_vars["GOOGLE_API_KEY"] = google_key
+
+        use_ollama = input("  使用本地 Ollama？(y/N): ").strip().lower()
+        if use_ollama in ("y", "yes", "是"):
+            env_vars["OLLAMA_ENABLED"] = "true"
+            ollama_model = input("    Ollama 模型名（默认 llama3.1）: ").strip()
+            if ollama_model:
+                env_vars["OLLAMA_MODEL"] = ollama_model
+
+        if not env_vars:
+            print("\n  ⚠️  未配置任何模型 Key！Anima 需要至少一个模型才能工作。")
+            print("  你可以稍后编辑 .env 文件补充。")
+
+        # ── Step 3: 消息频道（可选）────────────────────────────
+        print("\n  📡 Step 3/3: 消息频道（可选，直接回车跳过）\n")
+        print("  配置后 Anima 会自动连接这些平台接收你的指令\n")
+
+        tg_token = input("  Telegram Bot Token: ").strip()
+        if tg_token:
+            env_vars["TELEGRAM_BOT_TOKEN"] = tg_token
+            tg_chat_id = input("    你的 Telegram Chat ID: ").strip()
+            if tg_chat_id:
+                env_vars["TELEGRAM_OWNER_CHAT_ID"] = tg_chat_id
+
+        discord_token = input("  Discord Bot Token: ").strip()
+        if discord_token:
+            env_vars["DISCORD_BOT_TOKEN"] = discord_token
+            discord_uid = input("    你的 Discord User ID: ").strip()
+            if discord_uid:
+                env_vars["DISCORD_OWNER_USER_ID"] = discord_uid
+
+        slack_bot = input("  Slack Bot Token (xoxb-...): ").strip()
+        if slack_bot:
+            env_vars["SLACK_BOT_TOKEN"] = slack_bot
+            slack_app = input("    Slack App Token (xapp-...): ").strip()
+            if slack_app:
+                env_vars["SLACK_APP_TOKEN"] = slack_app
+
+        # ── 写入 .env 文件 ───────────────────────────────────
+        env_file = Path(".env")
+        env_lines = []
+        if env_file.exists():
+            env_lines = env_file.read_text(encoding="utf-8").splitlines()
+
+        # 更新或追加变量
+        existing_keys = set()
+        for i, line in enumerate(env_lines):
+            if "=" in line and not line.startswith("#"):
+                key = line.split("=", 1)[0].strip()
+                existing_keys.add(key)
+                if key in env_vars:
+                    env_lines[i] = f"{key}={env_vars[key]}"
+
+        # 追加新变量
+        for key, value in env_vars.items():
+            if key not in existing_keys:
+                env_lines.append(f"{key}={value}")
+
+        env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+        print(f"\n  ✅ 配置已写入 .env（{len(env_vars)} 项）")
+
+        # ── 重新加载环境变量 ──────────────────────────────────
+        for key, value in env_vars.items():
+            os.environ[key] = value
+
+        # ── 初始化员工身份 ───────────────────────────────────
         identity = self.identity.initialize(
             name=name, owner_name=owner_name,
             owner_id="owner_001", company_description=company_desc,
@@ -301,14 +402,38 @@ class AnimaRuntime:
             tags=["identity", "core"],
         )
 
+        # ── 完成总结 ─────────────────────────────────────────
+        providers_configured = sum(1 for k in ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"] if k in env_vars)
+        if "OLLAMA_ENABLED" in env_vars:
+            providers_configured += 1
+        channels = []
+        if "TELEGRAM_BOT_TOKEN" in env_vars:
+            channels.append("Telegram")
+        if "DISCORD_BOT_TOKEN" in env_vars:
+            channels.append("Discord")
+        if "SLACK_BOT_TOKEN" in env_vars:
+            channels.append("Slack")
+
         print(f"""
-  ✅ {name} 已创建！
-
-  信任等级: 试用期（需要积累信任）
-  SOUL.md:  {DATA_DIR}/SOUL.md
-
-  下一步运行:
-    anima start
+╔══════════════════════════════════════════════════╗
+║  ✅ {name} 初始化完成！                           
+╠══════════════════════════════════════════════════╣
+║  员工名字:   {name}
+║  服务对象:   {owner_name}
+║  模型数量:   {providers_configured} 个已配置
+║  消息频道:   {', '.join(channels) if channels else '无（仅Web控制中心）'}
+║  数据目录:   {DATA_DIR}
+║  配置文件:   .env
+╠══════════════════════════════════════════════════╣
+║  
+║  🚀 现在启动：
+║     anima start
+║  
+║  或者用 python run.py start
+║  
+║  打开浏览器访问 http://localhost:3210
+║  
+╚══════════════════════════════════════════════════╝
 """)
 
     # ─────────────────────────────────────────────────────────
