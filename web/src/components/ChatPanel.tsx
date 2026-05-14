@@ -4,7 +4,7 @@
  * 支持流式输出（逐字显示打字效果）
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, memo } from 'react'
 
 interface ChatMessage {
   id: string
@@ -25,7 +25,7 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
   const [isLoading, setIsLoading] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // 自动滚动到底部
   useEffect(() => {
@@ -40,7 +40,6 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
 
     const unsubscribe = onWsMessage((msg: any) => {
       if (msg.type === 'chat_reply') {
-        // 非流式回复
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'assistant',
@@ -53,7 +52,6 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
       } else if (msg.type === 'chat_stream_chunk') {
         setStreamingContent(prev => prev + msg.text)
       } else if (msg.type === 'chat_stream_end') {
-        // 流式结束，把累积内容转为正式消息
         setStreamingContent(prev => {
           if (prev) {
             setMessages(msgs => [...msgs, {
@@ -76,7 +74,6 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
     const text = input.trim()
     if (!text || isLoading) return
 
-    // 添加用户消息
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
@@ -86,20 +83,29 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
 
     setInput('')
     setIsLoading(true)
-
-    // 发送到后端（使用流式）
     sendCommand('chat_stream', { text })
+
+    // 重新聚焦输入框
+    setTimeout(() => inputRef.current?.focus(), 0)
   }, [input, isLoading, sendCommand])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
-  }
+  }, [handleSend])
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    // 自动调整高度
+    const el = e.target
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  }, [])
 
   return (
-    <div className="h-full flex flex-col bg-anima-bg rounded-lg border border-anima-border overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* 头部 */}
       <div className="px-4 py-2 border-b border-anima-border flex items-center gap-2 flex-shrink-0">
         <span className="text-sm">💬</span>
@@ -129,8 +135,8 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
             <div className="w-6 h-6 rounded-full bg-anima-accent/20 flex items-center justify-center text-xs flex-shrink-0">
               🦾
             </div>
-            <div className="bg-anima-card rounded-lg rounded-tl-none px-3 py-2 max-w-[80%]">
-              <p className="text-sm whitespace-pre-wrap">{streamingContent}<span className="animate-pulse">|</span></p>
+            <div className="bg-anima-card rounded-lg rounded-tl-none px-3 py-2 max-w-[85%]">
+              <p className="text-sm whitespace-pre-wrap break-words">{streamingContent}<span className="animate-pulse">|</span></p>
             </div>
           </div>
         )}
@@ -154,26 +160,26 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
 
       {/* 输入框 */}
       <div className="p-3 border-t border-anima-border flex-shrink-0">
-        <div className="flex gap-2">
-          <input
+        <div className="flex gap-2 items-end">
+          <textarea
             ref={inputRef}
-            type="text"
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="输入消息... (Enter 发送)"
+            placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
             disabled={isLoading}
+            rows={1}
             className="flex-1 bg-anima-card border border-anima-border rounded-lg px-3 py-2 text-sm
-                       text-anima-text placeholder-anima-muted/50
+                       text-anima-text placeholder-anima-muted/50 resize-none
                        focus:outline-none focus:border-anima-accent/50 focus:ring-1 focus:ring-anima-accent/20
-                       disabled:opacity-50 transition-colors"
+                       disabled:opacity-50 transition-colors min-h-[38px] max-h-[120px]"
           />
           <button
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
             className="px-4 py-2 bg-anima-accent text-anima-bg text-sm font-medium rounded-lg
                        hover:bg-anima-accent/80 disabled:opacity-30 disabled:cursor-not-allowed
-                       transition-all active:scale-95"
+                       transition-all active:scale-95 flex-shrink-0 h-[38px]"
           >
             发送
           </button>
@@ -183,14 +189,14 @@ export function ChatPanel({ sendCommand, onWsMessage }: Props) {
   )
 }
 
-// ── 消息气泡 ─────────────────────────────────────────────────
+// ── 消息气泡（使用 memo）─────────────────────────────────────
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user'
   const time = formatTime(message.timestamp)
 
   return (
-    <div className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''} animate-slide-in`}>
+    <div className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
       {/* 头像 */}
       <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
         isUser ? 'bg-anima-accent2/20' : 'bg-anima-accent/20'
@@ -199,7 +205,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
 
       {/* 内容 */}
-      <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
         <div className={`rounded-lg px-3 py-2 ${
           isUser
             ? 'bg-anima-accent2/15 rounded-tr-none'
@@ -211,7 +217,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
     </div>
   )
-}
+})
 
 function formatTime(iso: string): string {
   try {

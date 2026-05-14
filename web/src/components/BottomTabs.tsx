@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, memo } from 'react'
 import type { AnimaEvent, AnimaSnapshot } from '../hooks/useAnima'
 
 interface Props {
@@ -8,25 +8,25 @@ interface Props {
 
 type Tab = 'questions' | 'memory' | 'evolution' | 'providers'
 
+const tabs: { key: Tab; label: string; icon: string }[] = [
+  { key: 'questions', label: '问题树', icon: '❓' },
+  { key: 'memory', label: '记忆库', icon: '💾' },
+  { key: 'evolution', label: '进化日志', icon: '🧬' },
+  { key: 'providers', label: '模型', icon: '🤖' },
+]
+
 export function BottomTabs({ snapshot, events }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('questions')
-
-  const tabs: { key: Tab; label: string; icon: string }[] = [
-    { key: 'questions', label: '问题树', icon: '❓' },
-    { key: 'memory', label: '记忆库', icon: '💾' },
-    { key: 'evolution', label: '进化日志', icon: '🧬' },
-    { key: 'providers', label: '模型', icon: '🤖' },
-  ]
 
   return (
     <div className="h-full flex flex-col">
       {/* Tab 切换栏 */}
-      <div className="flex border-b border-anima-border flex-shrink-0">
+      <div className="flex border-b border-anima-border flex-shrink-0 overflow-x-auto">
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-xs font-medium transition-colors ${
+            className={`px-4 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.key
                 ? 'text-anima-accent border-b-2 border-anima-accent bg-anima-accent/5'
                 : 'text-anima-muted hover:text-anima-text'
@@ -50,7 +50,7 @@ export function BottomTabs({ snapshot, events }: Props) {
 
 // ── 问题树 Tab ───────────────────────────────────────────────
 
-function QuestionsTab({ snapshot }: { snapshot: AnimaSnapshot | null }) {
+const QuestionsTab = memo(function QuestionsTab({ snapshot }: { snapshot: AnimaSnapshot | null }) {
   const stats = snapshot?.questions
   if (!stats) return <Empty text="暂无数据" />
 
@@ -67,12 +67,15 @@ function QuestionsTab({ snapshot }: { snapshot: AnimaSnapshot | null }) {
       </p>
     </div>
   )
-}
+})
 
 // ── 记忆库 Tab ───────────────────────────────────────────────
 
-function MemoryTab({ events }: { events: AnimaEvent[] }) {
-  const memoryEvents = events.filter(e => e.type === 'memory').slice(-20)
+const MemoryTab = memo(function MemoryTab({ events }: { events: AnimaEvent[] }) {
+  const memoryEvents = useMemo(
+    () => events.filter(e => e.type === 'memory').slice(-20),
+    [events]
+  )
 
   if (memoryEvents.length === 0) {
     return <Empty text="暂无记忆操作记录" />
@@ -89,12 +92,15 @@ function MemoryTab({ events }: { events: AnimaEvent[] }) {
       ))}
     </div>
   )
-}
+})
 
 // ── 进化日志 Tab ─────────────────────────────────────────────
 
-function EvolutionTab({ snapshot, events }: { snapshot: AnimaSnapshot | null; events: AnimaEvent[] }) {
-  const evoEvents = events.filter(e => e.type === 'evolution').slice(-15)
+const EvolutionTab = memo(function EvolutionTab({ snapshot, events }: { snapshot: AnimaSnapshot | null; events: AnimaEvent[] }) {
+  const evoEvents = useMemo(
+    () => events.filter(e => e.type === 'evolution').slice(-15),
+    [events]
+  )
   const stats = snapshot?.evolution
 
   return (
@@ -119,11 +125,11 @@ function EvolutionTab({ snapshot, events }: { snapshot: AnimaSnapshot | null; ev
       </div>
     </div>
   )
-}
+})
 
 // ── 模型 Provider Tab ────────────────────────────────────────
 
-function ProvidersTab({ snapshot }: { snapshot: AnimaSnapshot | null }) {
+const ProvidersTab = memo(function ProvidersTab({ snapshot }: { snapshot: AnimaSnapshot | null }) {
   const providers = snapshot?.providers
   if (!providers) return <Empty text="暂无 Provider 数据" />
 
@@ -141,7 +147,7 @@ function ProvidersTab({ snapshot }: { snapshot: AnimaSnapshot | null }) {
       </p>
     </div>
   )
-}
+})
 
 // ── 工具组件 ─────────────────────────────────────────────────
 

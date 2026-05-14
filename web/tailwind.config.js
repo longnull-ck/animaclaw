@@ -36,7 +36,14 @@ export default {
           '100%': { boxShadow: '0 0 20px rgba(0, 212, 170, 0.6)' },
         },
       },
+      screens: {
+        'xs': '475px',
+      },
     },
   },
   plugins: [],
+  // 优化：只生成使用到的 class
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
 }

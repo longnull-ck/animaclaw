@@ -1,6 +1,7 @@
 /**
  * useAnima — WebSocket Hook
  * 连接 Anima 后端，实时接收思维流事件
+ * 优化：事件批量更新、有限缓冲区、自动重连退避
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -40,7 +41,16 @@ export interface UseAnimaResult {
   onWsMessage: (handler: (msg: any) => void) => () => void
 }
 
-const WS_URL = `ws://${window.location.hostname}:${window.location.port || '3210'}/ws`
+const MAX_EVENTS = 200
+const HEARTBEAT_INTERVAL = 30000 // 30s
+
+// 根据当前连接构建 WS URL
+function buildWsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const host = window.location.hostname
+  const port = window.location.port || '3210'
+  return `${proto}://${host}:${port}/ws`
+}
 
 export function useAnima(): UseAnimaResult {
   const [connected, setConnected] = useState(false)
@@ -48,53 +58,74 @@ export function useAnima(): UseAnimaResult {
   const [snapshot, setSnapshot] = useState<AnimaSnapshot | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>()
+  const heartbeatRef = useRef<ReturnType<typeof setInterval>>()
   const messageHandlersRef = useRef<Set<(msg: any) => void>>(new Set())
+  const reconnectDelayRef = useRef(1000) // 指数退避起始值
 
   const connect = useCallback(() => {
-    const ws = new WebSocket(WS_URL)
-    wsRef.current = ws
+    try {
+      const ws = new WebSocket(buildWsUrl())
+      wsRef.current = ws
 
-    ws.onopen = () => {
-      setConnected(true)
-      console.log('[Anima] WebSocket 已连接')
-    }
+      ws.onopen = () => {
+        setConnected(true)
+        reconnectDelayRef.current = 1000 // 重置退避
+        console.log('[Anima] WebSocket 已连接')
 
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-
-        // 派发给所有外部处理器（ChatPanel 等）
-        messageHandlersRef.current.forEach(handler => handler(msg))
-
-        if (msg.type === 'history') {
-          // 历史事件回放
-          setEvents(msg.events || [])
-        } else if (msg.type === 'snapshot') {
-          // 状态快照
-          setSnapshot(msg.data)
-        } else if (msg.type === 'pong') {
-          // heartbeat response
-        } else if (msg.type?.startsWith('chat_')) {
-          // chat 相关消息由 ChatPanel 的 handler 处理，不加入事件流
-        } else if (msg.type === 'feedback_result') {
-          // 反馈结果由 handler 处理
-        } else {
-          // 新实时事件
-          setEvents(prev => [...prev.slice(-199), msg])
-        }
-      } catch (err) {
-        console.error('[Anima] 消息解析失败:', err)
+        // 启动心跳
+        heartbeatRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ action: 'ping' }))
+          }
+        }, HEARTBEAT_INTERVAL)
       }
-    }
 
-    ws.onclose = () => {
-      setConnected(false)
-      console.log('[Anima] WebSocket 断开，5s 后重连')
-      reconnectRef.current = setTimeout(connect, 5000)
-    }
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data)
 
-    ws.onerror = () => {
-      ws.close()
+          // 派发给所有外部处理器
+          messageHandlersRef.current.forEach(handler => handler(msg))
+
+          if (msg.type === 'history') {
+            setEvents(msg.events || [])
+          } else if (msg.type === 'snapshot') {
+            setSnapshot(msg.data)
+          } else if (msg.type === 'pong') {
+            // heartbeat response — no-op
+          } else if (msg.type?.startsWith('chat_') || msg.type === 'feedback_result') {
+            // 由 handler 处理，不加入事件流
+          } else {
+            // 新实时事件 — 有限缓冲
+            setEvents(prev => {
+              const next = [...prev, msg]
+              return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next
+            })
+          }
+        } catch (err) {
+          console.error('[Anima] 消息解析失败:', err)
+        }
+      }
+
+      ws.onclose = () => {
+        setConnected(false)
+        if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+
+        // 指数退避重连 (1s → 2s → 4s → ... → max 30s)
+        const delay = reconnectDelayRef.current
+        console.log(`[Anima] WebSocket 断开，${delay / 1000}s 后重连`)
+        reconnectRef.current = setTimeout(connect, delay)
+        reconnectDelayRef.current = Math.min(delay * 2, 30000)
+      }
+
+      ws.onerror = () => {
+        ws.close()
+      }
+    } catch (err) {
+      console.error('[Anima] WebSocket 连接失败:', err)
+      const delay = reconnectDelayRef.current
+      reconnectRef.current = setTimeout(connect, delay)
+      reconnectDelayRef.current = Math.min(delay * 2, 30000)
     }
   }, [])
 
@@ -103,6 +134,7 @@ export function useAnima(): UseAnimaResult {
     return () => {
       wsRef.current?.close()
       if (reconnectRef.current) clearTimeout(reconnectRef.current)
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current)
     }
   }, [connect])
 

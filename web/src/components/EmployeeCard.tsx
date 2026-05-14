@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import type { AnimaSnapshot } from '../hooks/useAnima'
 
 interface Props {
@@ -11,7 +12,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   logistics: '物流供应链', customer_service: '客户服务',
 }
 
-export function EmployeeCard({ snapshot }: Props) {
+export const EmployeeCard = memo(function EmployeeCard({ snapshot }: Props) {
   if (!snapshot?.identity) {
     return (
       <div className="text-center text-anima-muted py-12 animate-fade-in">
@@ -79,26 +80,7 @@ export function EmployeeCard({ snapshot }: Props) {
       </div>
 
       {/* 技能列表 */}
-      <div className="bg-anima-bg rounded-lg p-3">
-        <h3 className="text-xs text-anima-muted mb-2">已安装技能 ({skills.length})</h3>
-        <div className="space-y-2 max-h-40 overflow-y-auto">
-          {skills.map(s => (
-            <div key={s.id} className="flex items-center gap-2">
-              <div className="flex-1 text-xs">{s.name}</div>
-              <div className="w-16 h-1.5 bg-anima-border rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-anima-accent2 rounded-full"
-                  style={{ width: `${s.proficiency * 100}%` }}
-                />
-              </div>
-              <span className="text-xs text-anima-muted w-8 text-right">{Math.round(s.proficiency * 100)}%</span>
-            </div>
-          ))}
-          {skills.length === 0 && (
-            <p className="text-xs text-anima-muted">暂无技能（遇到任务后自动安装）</p>
-          )}
-        </div>
-      </div>
+      <SkillsList skills={skills} />
 
       {/* 性格参数 */}
       <div className="bg-anima-bg rounded-lg p-3">
@@ -118,7 +100,32 @@ export function EmployeeCard({ snapshot }: Props) {
       </div>
     </div>
   )
-}
+})
+
+const SkillsList = memo(function SkillsList({ skills }: { skills: AnimaSnapshot['skills'] }) {
+  return (
+    <div className="bg-anima-bg rounded-lg p-3">
+      <h3 className="text-xs text-anima-muted mb-2">已安装技能 ({skills.length})</h3>
+      <div className="space-y-2 max-h-40 overflow-y-auto">
+        {skills.map(s => (
+          <div key={s.id} className="flex items-center gap-2">
+            <div className="flex-1 text-xs truncate">{s.name}</div>
+            <div className="w-16 h-1.5 bg-anima-border rounded-full overflow-hidden flex-shrink-0">
+              <div
+                className="h-full bg-anima-accent2 rounded-full"
+                style={{ width: `${s.proficiency * 100}%` }}
+              />
+            </div>
+            <span className="text-xs text-anima-muted w-8 text-right flex-shrink-0">{Math.round(s.proficiency * 100)}%</span>
+          </div>
+        ))}
+        {skills.length === 0 && (
+          <p className="text-xs text-anima-muted">暂无技能（遇到任务后自动安装）</p>
+        )}
+      </div>
+    </div>
+  )
+})
 
 function ParamBar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
