@@ -189,6 +189,12 @@ class MemoryStore:
             fts_results = [(r["id"], abs(r["rank"])) for r in rows]
         except sqlite3.OperationalError as e:
             logger.warning(f"[MemoryStore] FTS 失败: {e}")
+
+        # FTS5 unicode61 tokenizer 对中文/混合文本分词不佳，
+        # 如果 FTS 没有结果，回退到 LIKE 模糊匹配
+        if not fts_results:
+            fts_results = self._fallback_like_search(query, top_k * 2)
+
         if not fts_results:
             return []
 
@@ -213,6 +219,23 @@ class MemoryStore:
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
+
+    def _fallback_like_search(self, query: str, limit: int) -> list[tuple[str, float]]:
+        """FTS 无结果时使用 LIKE 回退搜索（支持中文子串匹配）"""
+        results: list[tuple[str, float]] = []
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT id, importance FROM cold_memory "
+                    "WHERE content LIKE ? OR tags LIKE ? "
+                    "ORDER BY importance DESC LIMIT ?",
+                    (f"%{query}%", f"%{query}%", limit),
+                ).fetchall()
+            # 给 LIKE 结果一个合理的伪 rank（基于 importance）
+            results = [(r["id"], r["importance"] * 5.0) for r in rows]
+        except Exception as e:
+            logger.warning(f"[MemoryStore] LIKE fallback 失败: {e}")
+        return results
 
     def decay_stale(self) -> int:
         now = datetime.utcnow()

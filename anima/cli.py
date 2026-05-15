@@ -38,6 +38,30 @@ logger = logging.getLogger("anima")
 DATA_DIR = Path(os.getenv("ANIMA_DATA_DIR", "./data"))
 
 
+def _safe_print(text: str) -> None:
+    """安全输出：Windows GBK 控制台无法渲染 emoji 时不崩溃"""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # 回退：替换无法编码的字符
+        print(text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(
+            sys.stdout.encoding or "utf-8", errors="replace"
+        ))
+
+
+# Windows 控制台 Unicode 兼容：设置 stdout/stderr 为 UTF-8（如果可能）
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        # Python < 3.7 或无法 reconfigure 时，包装 stdout
+        import io
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+
 # ─────────────────────────────────────────────────────────────
 # 运行时
 # ─────────────────────────────────────────────────────────────
