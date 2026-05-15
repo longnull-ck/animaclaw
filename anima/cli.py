@@ -74,6 +74,15 @@ class AnimaRuntime:
         self.qtree     = QuestionTree(DATA_DIR)
         self.evo       = EvolutionEngine(DATA_DIR)
 
+        from anima.rules.engine import RuleEngine
+        from anima.monitor.behavior import BehaviorMonitor
+
+        self.rules = RuleEngine(DATA_DIR / "rules")
+        self.rules.initialize()
+
+        self.monitor = BehaviorMonitor(DATA_DIR / "monitor", self.rules)
+        self.monitor.initialize()
+
         self.loop = MindLoop(
             identity_engine=self.identity,
             memory_manager=self.memory,
@@ -82,6 +91,8 @@ class AnimaRuntime:
             question_tree=self.qtree,
             evolution_engine=self.evo,
             brain=self.brain,
+            rule_engine=self.rules,
+            behavior_monitor=self.monitor,
             get_state=self._load_state,
             save_state=self._save_state,
             notify_owner=self._notify,
