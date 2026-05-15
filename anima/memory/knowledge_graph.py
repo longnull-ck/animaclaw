@@ -239,7 +239,8 @@ class KnowledgeGraph:
     def recall(self, concept: str, max_depth: int = 2, max_results: int = 20) -> list[dict]:
         """
         回忆一个概念的所有关联知识。
-        从概念出发，沿着关系走 max_depth 步。
+        使用 spreading activation：激活从起点沿边权传播，超过阈值的节点被召回。
+        边权随时间自动衰减（遗忘）。
 
         返回格式：
         [
@@ -248,76 +249,179 @@ class KnowledgeGraph:
                 "relation": "is_a",
                 "target": "内容电商平台",
                 "label": "",
-                "depth": 1,
+                "activation": 0.85,
                 "weight": 1.0,
             },
             ...
         ]
         """
-        # 找到起始节点
         node = self._find_node(concept)
         if not node:
             return []
 
-        # 记录访问
         self._touch_node(node.id)
 
-        # BFS 遍历图
+        # Spreading Activation
+        activated = self._spread_activation(
+            start_id=node.id,
+            initial_energy=1.0,
+            decay_factor=0.6,       # 每传播一步衰减 40%
+            threshold=0.15,         # 激活低于此值的节点不召回
+            max_steps=max_depth + 1,
+        )
+
+        # 将激活结果转为标准输出格式
         results: list[dict] = []
-        visited: set[str] = {node.id}
-        queue: list[tuple[str, int]] = [(node.id, 0)]  # (node_id, current_depth)
+        for node_id, activation in activated.items():
+            if node_id == node.id:
+                continue  # 跳过起点自身
 
-        while queue and len(results) < max_results:
-            current_id, depth = queue.pop(0)
+            target_node = self._get_node_by_id(node_id)
+            if not target_node:
+                continue
 
-            if depth >= max_depth:
+            # 找到连接到这个节点的边（从已激活的路径中）
+            edge_info = self._find_connecting_edge(node.id, node_id, activated)
+            relation = edge_info["relation"] if edge_info else "relates_to"
+            label = edge_info["label"] if edge_info else ""
+            weight = edge_info["weight"] if edge_info else 0.5
+
+            results.append({
+                "concept": concept,
+                "relation": relation,
+                "target": target_node.concept,
+                "target_description": target_node.description,
+                "label": label,
+                "activation": round(activation, 3),
+                "weight": weight,
+            })
+
+        # 按激活强度排序
+        results.sort(key=lambda r: -r["activation"])
+        return results[:max_results]
+
+    def _spread_activation(
+        self,
+        start_id: str,
+        initial_energy: float = 1.0,
+        decay_factor: float = 0.6,
+        threshold: float = 0.15,
+        max_steps: int = 3,
+    ) -> dict[str, float]:
+        """
+        扩散激活算法。
+
+        从 start_id 出发，能量沿着边传播：
+          - 每条边传递的能量 = 当前节点能量 × 边权(已衰减) × decay_factor
+          - 如果一个节点从多个路径接收能量，取最大值（不累加，防止爆炸）
+          - 低于 threshold 的激活不再传播
+
+        返回: {node_id: activation_level} 所有被激活的节点
+        """
+        activations: dict[str, float] = {start_id: initial_energy}
+        frontier: list[tuple[str, float, int]] = [(start_id, initial_energy, 0)]
+
+        while frontier:
+            current_id, current_energy, step = frontier.pop(0)
+
+            if step >= max_steps:
                 continue
 
             # 获取所有出边
             edges = self._get_outgoing_edges(current_id)
             for edge in edges:
-                target = self._get_node_by_id(edge.target_id)
-                if not target:
+                # 计算经过时间衰减后的边权
+                effective_weight = self._decayed_weight(edge)
+                # 传播的能量
+                spread_energy = current_energy * effective_weight * decay_factor
+
+                if spread_energy < threshold:
                     continue
 
-                results.append({
-                    "concept": self._get_node_by_id(current_id).concept if current_id != node.id else concept,
-                    "relation": edge.relation.value,
-                    "target": target.concept,
-                    "target_description": target.description,
-                    "label": edge.label,
-                    "depth": depth + 1,
-                    "weight": edge.weight,
-                })
+                target_id = edge.target_id
+                # 取最大激活值（不累加）
+                if target_id not in activations or activations[target_id] < spread_energy:
+                    activations[target_id] = spread_energy
+                    frontier.append((target_id, spread_energy, step + 1))
 
-                # 继续深入（未访问过的节点）
-                if target.id not in visited:
-                    visited.add(target.id)
-                    queue.append((target.id, depth + 1))
-
-            # 也获取入边（反向关系）
+            # 入边（反向传播，能量打折）
             in_edges = self._get_incoming_edges(current_id)
             for edge in in_edges:
-                source = self._get_node_by_id(edge.source_id)
-                if not source or source.id in visited:
+                effective_weight = self._decayed_weight(edge) * 0.5  # 反向传播额外衰减
+                spread_energy = current_energy * effective_weight * decay_factor
+
+                if spread_energy < threshold:
                     continue
 
-                results.append({
-                    "concept": self._get_node_by_id(current_id).concept if current_id != node.id else concept,
-                    "relation": f"reverse_{edge.relation.value}",
-                    "target": source.concept,
-                    "target_description": source.description,
+                source_id = edge.source_id
+                if source_id not in activations or activations[source_id] < spread_energy:
+                    activations[source_id] = spread_energy
+                    frontier.append((source_id, spread_energy, step + 1))
+
+        return activations
+
+    def _decayed_weight(self, edge: KnowledgeEdge) -> float:
+        """
+        计算边的时间衰减权重。
+        边创建越久，权重越低（模拟遗忘）。
+        衰减公式: weight × exp(-λ × days_since_creation)
+        λ = 0.01 意味着 ~100天后权重降到原来的 37%
+        """
+        import math
+        try:
+            created = datetime.fromisoformat(edge.created_at)
+            days_elapsed = (datetime.utcnow() - created).total_seconds() / 86400.0
+        except (ValueError, TypeError):
+            days_elapsed = 0.0
+
+        decay_lambda = 0.01  # 衰减速率
+        decay_multiplier = math.exp(-decay_lambda * days_elapsed)
+        return edge.weight * decay_multiplier
+
+    def _find_connecting_edge(
+        self, from_id: str, to_id: str, activated: dict[str, float]
+    ) -> dict | None:
+        """找到两个节点之间（可能经过中间节点）的最强连接边信息"""
+        # 先检查直接边
+        edges = self._get_outgoing_edges(from_id)
+        for edge in edges:
+            if edge.target_id == to_id:
+                return {
+                    "relation": edge.relation.value,
                     "label": edge.label,
-                    "depth": depth + 1,
-                    "weight": edge.weight * 0.7,  # 反向关系权重略低
-                })
+                    "weight": edge.weight,
+                }
 
-                visited.add(source.id)
-                queue.append((source.id, depth + 1))
+        # 检查反向直接边
+        in_edges = self._get_incoming_edges(from_id)
+        for edge in in_edges:
+            if edge.source_id == to_id:
+                return {
+                    "relation": f"reverse_{edge.relation.value}",
+                    "label": edge.label,
+                    "weight": edge.weight * 0.7,
+                }
 
-        # 按权重和深度排序（浅层+高权重优先）
-        results.sort(key=lambda r: (-r["weight"], r["depth"]))
-        return results[:max_results]
+        # 间接连接：找到任意一条连接到 to_id 的边
+        all_in = self._get_incoming_edges(to_id)
+        for edge in all_in:
+            if edge.source_id in activated:
+                return {
+                    "relation": edge.relation.value,
+                    "label": edge.label,
+                    "weight": edge.weight,
+                }
+
+        all_out = self._get_outgoing_edges(to_id)
+        for edge in all_out:
+            if edge.target_id in activated:
+                return {
+                    "relation": f"reverse_{edge.relation.value}",
+                    "label": edge.label,
+                    "weight": edge.weight * 0.7,
+                }
+
+        return None
 
     def recall_as_text(self, concept: str, max_depth: int = 2) -> str:
         """
@@ -401,6 +505,69 @@ class KnowledgeGraph:
         return list(related)
 
     # ─── 删除 ───────────────────────────────────────────────
+
+    def decay_all_edges(self, threshold: float = 0.1) -> int:
+        """
+        全图边权衰减（遗忘）。
+        删除衰减后有效权重低于 threshold 的边。
+        返回删除的边数。
+
+        建议定期调用（如每天一次）。
+        """
+        import math
+        removed = 0
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM kg_edges").fetchall()
+            for row in rows:
+                try:
+                    created = datetime.fromisoformat(row["created_at"])
+                    days = (datetime.utcnow() - created).total_seconds() / 86400.0
+                except (ValueError, TypeError):
+                    days = 0.0
+
+                effective = row["weight"] * math.exp(-0.01 * days)
+                if effective < threshold:
+                    conn.execute("DELETE FROM kg_edges WHERE id=?", (row["id"],))
+                    removed += 1
+
+        # 清除孤立节点（没有任何边的节点）
+        if removed:
+            with self._conn() as conn:
+                conn.execute("""
+                    DELETE FROM kg_nodes WHERE id NOT IN (
+                        SELECT source_id FROM kg_edges
+                        UNION
+                        SELECT target_id FROM kg_edges
+                    )
+                """)
+
+        if removed:
+            logger.info(f"[KG] 遗忘完成: 删除 {removed} 条弱关联边")
+        return removed
+
+    def reinforce_edge(self, concept: str, target: str, boost: float = 0.2) -> bool:
+        """
+        强化一条边（被回忆/使用时调用）。
+        相当于"复习"——重置衰减起点，增加权重。
+        """
+        source_node = self._find_node(concept)
+        target_node = self._find_node(target)
+        if not source_node or not target_node:
+            return False
+
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM kg_edges WHERE source_id=? AND target_id=?",
+                (source_node.id, target_node.id),
+            ).fetchone()
+            if row:
+                new_weight = min(2.0, row["weight"] + boost)
+                conn.execute(
+                    "UPDATE kg_edges SET weight=?, created_at=? WHERE id=?",
+                    (new_weight, datetime.utcnow().isoformat(), row["id"]),
+                )
+                return True
+        return False
 
     def forget_concept(self, concept: str) -> bool:
         """删除一个概念及其所有关系"""
